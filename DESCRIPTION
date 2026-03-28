@@ -1,6 +1,6 @@
 Package: physmerge
 Title: Physical Locus Merging for GWAS Summary Statistics
-Version: 0.2.0
+Version: 0.2.1
 Authors@R: person("Pin", role = c("aut", "cre"), email = "your@email.com")
 Description: Collapses overlapping genomic signals into non-overlapping locus
     blocks using a forward sliding-window approach, without requiring an LD
