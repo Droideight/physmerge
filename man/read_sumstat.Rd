@@ -58,17 +58,15 @@ SNP appears once per TEST value.}
 (e.g. \code{nThread}, \code{skip}).}
 }
 \value{
-A data frame containing all original columns plus:
+A named list with two elements:
 \describe{
-\item{\code{position}}{Numeric copy of the position column.}
-\item{\code{value}}{Numeric copy of the value column.}
+\item{\code{data}}{The prepared data frame with all original columns plus
+\code{position} and \code{value} appended, sorted by position.
+Rows with \code{NA} in either column are dropped.}
+\item{\code{reward}}{Suggested reward direction for
+\code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
+test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
 }
-Rows where \code{position} or \code{value} is \code{NA} are dropped.
-The data frame is sorted by \code{position}.
-
-An attribute \code{"suggested_reward"} is attached: \code{"max"} if
-\code{value_col} is \code{"LOG10_P"} or a test statistic, \code{"min"}
-otherwise.  Pass this to \code{\link{physical_merge}} as \code{reward}.
 }
 \description{
 A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP
@@ -78,17 +76,18 @@ fast, separator-agnostic reading.
 \examples{
 \dontrun{
 # PLINK2 sumstats (TEST filter auto-enabled)
-df <- read_sumstat("my_gwas.glm.linear", format = "plink2")
-blocks <- physical_merge(df, sig_th = 5e-8, window = 500000,
-                         reward = attr(df, "suggested_reward"))
+out <- read_sumstat("my_gwas.glm.linear", format = "plink2")
+blocks <- physical_merge(out$data, sig_th = 5e-8, window = 500000,
+                         reward = out$reward)
+blocks <- annotate_blocks(blocks, out$data)
 
 # REML-GPCM output
-df <- read_sumstat("stage1_ch1_P_HPI.csv", format = "gpcm",
-                   value_col = "P_HPI", chrom = 1)
+out <- read_sumstat("stage1_ch1_P_HPI.csv", format = "gpcm",
+                    value_col = "P_HPI", chrom = 1)
 
 # Custom format
-df <- read_sumstat("results.txt", format = "custom",
-                   chrom_col = "CHR", pos_col = "BP",
-                   id_col = "SNP", value_col = "P")
+out <- read_sumstat("results.txt", format = "custom",
+                    chrom_col = "CHR", pos_col = "BP",
+                    id_col = "SNP", value_col = "P")
 }
 }

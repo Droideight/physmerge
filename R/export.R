@@ -154,9 +154,14 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
     if (!"CHROM" %in% names(blocks))
       stop("by_chrom = TRUE requires a 'CHROM' column in blocks.")
     
+    path    <- normalizePath(path, mustWork = FALSE)  # fix relative path before setwd
     tmp_dir <- tempfile(pattern = "physmerge_export_")
     dir.create(tmp_dir)
-    on.exit(unlink(tmp_dir, recursive = TRUE))
+    old_wd <- getwd()
+    on.exit({
+      setwd(old_wd)                        # restore wd even if zip fails
+      unlink(tmp_dir, recursive = TRUE)    # then clean up tmp dir
+    }, add = FALSE)
     
     chroms <- sort(unique(as.character(blocks$CHROM)))
     for (ch in chroms) {
@@ -164,10 +169,8 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
       writeLines(ch_ids, file.path(tmp_dir, paste0("snp_ch", ch, ".txt")))
     }
     
-    old_wd <- getwd()
     setwd(tmp_dir)
     utils::zip(path, files = list.files(tmp_dir), flags = "-j")
-    setwd(old_wd)
     
     message("Wrote ", length(chroms), " chromosome file(s) to ", path)
   }

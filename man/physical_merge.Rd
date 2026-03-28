@@ -4,37 +4,36 @@
 \alias{physical_merge}
 \title{Physical locus merging}
 \usage{
-physical_merge(data, sig_th, window, reward = "min")
+physical_merge(data, sig_th, window, reward = "min", chrom_col = NULL)
 }
 \arguments{
 \item{data}{A data frame with (at least) two numeric columns:
 \describe{
-\item{\code{position}}{Base-pair coordinate (sorted ascending
-internally).}
-\item{\code{value}}{Test statistic or p-value used for significance
-testing.}
+\item{\code{position}}{Base-pair coordinate.}
+\item{\code{value}}{Test statistic or p-value.}
 }}
 
-\item{sig_th}{Significance threshold (length-1 numeric).  A SNP is
-significant when \code{value < sig_th} (\code{reward = "min"}) or
-\code{value > sig_th} (\code{reward = "max"}).}
+\item{sig_th}{Significance threshold (length-1 numeric).}
 
-\item{window}{Window size in base-pairs (positive numeric).  Controls how
-far the algorithm searches ahead for the next signal, and how far blocks
-extend on each side of their representative SNP.}
+\item{window}{Window size in base-pairs (positive numeric).}
 
-\item{reward}{\code{"min"} (default) for p-values (smaller = more
-significant); \code{"max"} for test statistics (larger = more
-significant).}
+\item{reward}{\code{"min"} (default) for p-values; \code{"max"} for
+test statistics.}
+
+\item{chrom_col}{Name of the chromosome column in \code{data}.  If
+\code{NULL} (default), the function auto-detects a column named
+\code{"CHROM"}.  When a chromosome column is found and contains more
+than one unique value, the algorithm runs per chromosome.}
 }
 \value{
 A data frame with one row per merged locus block:
 \describe{
 \item{\code{serial}}{Sequential block index (1, 2, 3, …).}
+\item{\code{CHROM}}{Chromosome (present when a chromosome column is
+detected).}
 \item{\code{start}}{Block start in bp.}
 \item{\code{end}}{Block end in bp.}
-\item{\code{rps_BP}}{Position of the most significant (representative)
-SNP in the block.}
+\item{\code{rps_BP}}{Position of the most significant representative SNP.}
 \item{\code{rps_value}}{Value of the representative SNP.}
 }
 }
@@ -59,6 +58,10 @@ the more significant representative.
 still overlaps the next block's \code{start}, the \code{end} is trimmed
 to \code{start} of the next block, guaranteeing zero overlap.
 }
+
+When the input contains multiple chromosomes (detected via \code{chrom_col}
+or an existing \code{CHROM} column), the algorithm is run independently per
+chromosome to prevent cross-boundary merges.
 }
 \examples{
 df <- data.frame(
