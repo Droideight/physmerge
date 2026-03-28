@@ -96,8 +96,9 @@ annotate_blocks <- function(blocks, data,
   rest <- setdiff(names(out), c(meta,
                                  "serial", "start", "end",
                                  "rps_BP", "rps_ID", "rps_value"))
-  out  <- out[, c(meta, rest), drop = FALSE]
-  out[order(out$serial), ]
+  out <- out[order(out$serial), ]
+  out <- out[, c(meta, rest), drop = FALSE]
+  out
 }
 
 
