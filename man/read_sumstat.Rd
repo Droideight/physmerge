@@ -58,14 +58,17 @@ SNP appears once per TEST value.}
 (e.g. \code{nThread}, \code{skip}).}
 }
 \value{
-A named list with two elements:
+A data frame containing all original columns plus:
 \describe{
-\item{\code{data}}{The prepared data frame with \code{position} and
-\code{value} columns appended, sorted by position.}
-\item{\code{reward}}{Suggested reward direction for
-\code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
-test statistic or \code{LOG10_P}, \code{"min"} otherwise.}
+\item{\code{position}}{Numeric copy of the position column.}
+\item{\code{value}}{Numeric copy of the value column.}
 }
+Rows where \code{position} or \code{value} is \code{NA} are dropped.
+The data frame is sorted by \code{position}.
+
+An attribute \code{"suggested_reward"} is attached: \code{"max"} if
+\code{value_col} is \code{"LOG10_P"} or a test statistic, \code{"min"}
+otherwise.  Pass this to \code{\link{physical_merge}} as \code{reward}.
 }
 \description{
 A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP

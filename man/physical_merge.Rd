@@ -31,10 +31,8 @@ significant).}
 A data frame with one row per merged locus block:
 \describe{
 \item{\code{serial}}{Sequential block index (1, 2, 3, …).}
-\item{\code{start}}{Block start in bp (\code{rps_BP} of opening SNP
-minus \code{window}, floored at 0).}
-\item{\code{end}}{Block end in bp (last in-block position plus
-\code{window}, trimmed if overlapping the next block).}
+\item{\code{start}}{Block start in bp.}
+\item{\code{end}}{Block end in bp.}
 \item{\code{rps_BP}}{Position of the most significant (representative)
 SNP in the block.}
 \item{\code{rps_value}}{Value of the representative SNP.}

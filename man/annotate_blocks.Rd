@@ -4,38 +4,67 @@
 \alias{annotate_blocks}
 \title{Annotate merged blocks with full rows from the original input}
 \usage{
-annotate_blocks(blocks, data, chrom_col = NULL, id_col = NULL)
+annotate_blocks(
+  blocks,
+  data,
+  chrom_col = NULL,
+  id_col = NULL,
+  keep_serial = TRUE,
+  keep_start = TRUE,
+  keep_end = TRUE,
+  keep_rps_BP = TRUE,
+  keep_rps_value = TRUE,
+  keep_rps_ID = TRUE
+)
 }
 \arguments{
-\item{blocks}{Data frame returned by \code{\link{physical_merge}} (or
-\code{\link{run_physical_merge_from_csv}}).}
+\item{blocks}{Data frame returned by \code{\link{physical_merge}}.}
 
-\item{data}{The original input data frame passed to (or returned by)
-\code{\link{read_sumstat}} / \code{\link{read_gpcm_csv}}.  Must contain a
-\code{position} column.}
+\item{data}{The original input data frame passed to
+\code{\link{read_sumstat}}.  Must contain a \code{position} column.}
 
 \item{chrom_col}{Name of the chromosome column in \code{data}.  If
-\code{NULL} (default), the function looks for \code{"CHROM"} then
-\code{"#CHROM"}.}
+\code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.}
 
 \item{id_col}{Name of the SNP ID column in \code{data} used to populate
-\code{rps_ID} in the output.  If \code{NULL} (default), the function
-looks for \code{"ID"} then \code{"SNP"}.  Set to \code{NA} to skip.}
+\code{rps_ID}.  If \code{NULL} (default), auto-detects \code{"ID"} then
+\code{"SNP"}.  Set to \code{NA} to skip.}
+
+\item{keep_serial}{Logical. Include \code{serial} column. Default \code{TRUE}.}
+
+\item{keep_start}{Logical. Include \code{start} column. Default \code{TRUE}.}
+
+\item{keep_end}{Logical. Include \code{end} column. Default \code{TRUE}.}
+
+\item{keep_rps_BP}{Logical. Include \code{rps_BP} column. Default \code{TRUE}.}
+
+\item{keep_rps_value}{Logical. Include \code{rps_value} column. Default \code{TRUE}.}
+
+\item{keep_rps_ID}{Logical. Include \code{rps_ID} column (when available).
+Default \code{TRUE}.}
 }
 \value{
-The \code{blocks} data frame with additional columns from
-\code{data} for the representative SNP row.  A column \code{rps_ID} is
-added when an ID column is found.
+The \code{blocks} data frame merged with full original columns for
+each representative SNP row, with block metadata columns selectively
+retained based on \code{keep_*} arguments.
 }
 \description{
 Joins the original input data back to the merged block table on
 \code{rps_BP}, returning one row per block containing all original columns
-for the representative SNP.
+for the representative SNP.  Block metadata columns (\code{serial},
+\code{start}, \code{end}, \code{rps_BP}, \code{rps_value}) can be
+individually included or dropped.
 }
 \examples{
 \dontrun{
 df     <- read_sumstat("my_gwas.glm.linear", format = "plink2")
-blocks <- physical_merge(df, sig_th = 5e-8, window = 500000)
-blocks_annotated <- annotate_blocks(blocks, df)
+blocks <- physical_merge(df$data, sig_th = 5e-8, window = 500000)
+
+# Keep all block metadata (default)
+annotate_blocks(blocks, df$data)
+
+# Drop start/end/rps_value — only keep serial, rps_BP, rps_ID + original cols
+annotate_blocks(blocks, df$data,
+                keep_start = FALSE, keep_end = FALSE, keep_rps_value = FALSE)
 }
 }
