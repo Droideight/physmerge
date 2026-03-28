@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r Library_and_Toy_dataset}
-devtools::install_github("Droideight/physmerge")
+devtools::install_github("Droideight/physmerge", force = TRUE)
 library(physmerge)
 
 set.seed(42)
