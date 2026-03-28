@@ -70,7 +70,7 @@
 #' )
 #' physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
 physical_merge <- function(data, sig_th, window, reward = "min") {
-
+  
   # ── Input validation ─────────────────────────────────────────────────────────
   if (!is.data.frame(data))
     stop("`data` must be a data frame.")
@@ -84,27 +84,27 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
     stop("`sig_th` must be a single numeric value.")
   if (length(window) != 1L || !is.numeric(window) || window <= 0)
     stop("`window` must be a single positive numeric value.")
-
+  
   # ── Sort and initialise ───────────────────────────────────────────────────────
   data <- data[order(data$position), ]
   n    <- nrow(data)
-
+  
   empty_out <- data.frame(
     serial    = integer(0), start = numeric(0), end   = numeric(0),
     rps_BP    = numeric(0), rps_value = numeric(0)
   )
   if (n == 0L) return(empty_out)
-
+  
   # Pre-allocate output vectors (avoids O(n²) rbind growth)
   out_serial  <- integer(n);  out_start   <- numeric(n)
   out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
   out_rps_val <- numeric(n);  block_count <- 0L
-
+  
   in_block       <- FALSE
   steps          <- window
   sig_this_block <- sig_th
   last_pos       <- data$position[1L]
-
+  
   # ── Helper closures ───────────────────────────────────────────────────────────
   open_block <- function(pos, val) {
     block_count <<- block_count + 1L
@@ -117,29 +117,29 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
     steps          <<- window
     sig_this_block <<- val
   }
-
+  
   close_block <- function(last_inblock_pos) {
     out_end[block_count] <<- last_inblock_pos + steps  # use remaining steps, not full window
     in_block             <<- FALSE
     steps                <<- window
     sig_this_block       <<- sig_th
   }
-
+  
   # ── Forward scan ─────────────────────────────────────────────────────────────
   for (i in seq_len(n)) {
     pos <- data$position[i]
     val <- data$value[i]
-
+    
     if (!in_block) {
       if (.is_significant(val, sig_th, reward)) open_block(pos, val)
-
+      
     } else {
       remaining <- steps - (pos - last_pos)
-
+      
       if (remaining <= 0) {
         close_block(last_pos)
         if (.is_significant(val, sig_th, reward)) open_block(pos, val)
-
+        
       } else {
         steps <- remaining
         if (.is_more_significant(val, sig_this_block, reward)) {
@@ -154,7 +154,7 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   }
   if (in_block) close_block(last_pos)
   if (block_count == 0L) return(empty_out)
-
+  
   raw_blocks <- data.frame(
     serial    = out_serial[seq_len(block_count)],
     start     = out_start[seq_len(block_count)],
@@ -163,10 +163,10 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
     rps_value = out_rps_val[seq_len(block_count)],
     stringsAsFactors = FALSE
   )
-
+  
   # ── Collapse pass ─────────────────────────────────────────────────────────────
   blk <- .collapse_blocks(raw_blocks, window, reward)
-
+  
   # ── Trim pass ────────────────────────────────────────────────────────────────
   if (nrow(blk) > 1L) {
     for (i in seq_len(nrow(blk) - 1L)) {
@@ -174,7 +174,7 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
         blk$end[i] <- blk$start[i + 1L]
     }
   }
-
+  
   blk
 }
 
