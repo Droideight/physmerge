@@ -3,6 +3,4 @@
 export(annotate_blocks)
 export(export_snp_list)
 export(physical_merge)
-export(read_gpcm_csv)
 export(read_sumstat)
-export(run_physical_merge_from_csv)

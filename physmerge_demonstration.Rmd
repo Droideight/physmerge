@@ -87,7 +87,10 @@ plink <- read_sumstat(
 head(plink)
 merged_plink <- physical_merge(plink$data, 5e-8, 500000, reward = "min")
 head(merged_plink)
-recovered_plink <- annotate_blocks(merged_plink, plink$data)
+recovered_plink <- annotate_blocks(merged_plink, plink$data, 
+                                   keep_serial = FALSE, keep_start = FALSE, 
+                                   keep_end = FALSE, keep_rps_BP = FALSE,
+                                   keep_rps_value = FALSE, keep_rps_ID = FALSE)
 head(recovered_plink)
 # You can see annotate block now produces different result.
 # "plink" has two field: data and reward. To access, plink$data is necessary.
@@ -118,7 +121,10 @@ gpcm <- read_sumstat("/Users/user/Desktop/Classes/Res Prog/Housekeeping/stage1_c
 head(gpcm)
 merged_gpcm <- physical_merge(gpcm$data, 5e-8, 500000, reward = "min")
 head(merged_gpcm)
-recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data)
+recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data, 
+                                  keep_serial = FALSE, keep_start = FALSE, 
+                                  keep_end = FALSE, keep_rps_BP = FALSE,
+                                  keep_rps_value = FALSE, keep_rps_ID = FALSE)
 head(recovered_gpcm)
 # -----------------------------------------------------------------------------
 
