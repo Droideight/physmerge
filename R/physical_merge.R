@@ -54,10 +54,8 @@
 #' @return A data frame with one row per merged locus block:
 #' \describe{
 #'   \item{\code{serial}}{Sequential block index (1, 2, 3, …).}
-#'   \item{\code{start}}{Block start in bp (\code{rps_BP} of opening SNP
-#'     minus \code{window}, floored at 0).}
-#'   \item{\code{end}}{Block end in bp (last in-block position plus
-#'     \code{window}, trimmed if overlapping the next block).}
+#'   \item{\code{start}}{Block start in bp.}
+#'   \item{\code{end}}{Block end in bp.}
 #'   \item{\code{rps_BP}}{Position of the most significant (representative)
 #'     SNP in the block.}
 #'   \item{\code{rps_value}}{Value of the representative SNP.}
@@ -201,107 +199,4 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   out$serial    <- seq_len(nrow(out))
   rownames(out) <- NULL
   out
-}
-
-
-# ==============================================================================
-
-#' Read a REML-GPCM per-SNP CSV file
-#'
-#' Reads a Stage 2 REML-GPCM output CSV and prepares it for
-#' \code{\link{physical_merge}}.  The chromosome column \code{"#CHROM"} is
-#' normalised to \code{"CHROM"}, and two interface columns (\code{position},
-#' \code{value}) are appended.
-#'
-#' @param path      Path to the CSV file.
-#' @param value_col Column to use as the merging criterion.  Common choices:
-#'   \code{"P_HPI"} (default), \code{"P_Direct"}, \code{"P_Indirect"},
-#'   \code{"P_TE"}.
-#' @param chrom     Optional character/integer vector of chromosomes to retain.
-#'   \code{NULL} (default) keeps all.
-#'
-#' @return The input data frame with two extra columns: \code{position} (copy
-#'   of \code{POS}, numeric) and \code{value} (copy of \code{value_col},
-#'   numeric).  Rows with \code{NA} in either column are dropped.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' df <- read_gpcm_csv("stage1_ch1_P_HPI.csv", value_col = "P_HPI")
-#' }
-read_gpcm_csv <- function(path, value_col = "P_HPI", chrom = NULL) {
-
-  raw <- utils::read.csv(path, header = TRUE, stringsAsFactors = FALSE,
-                         check.names = FALSE)
-  names(raw)[names(raw) == "#CHROM"] <- "CHROM"
-
-  required <- c("CHROM", "POS", value_col)
-  missing  <- setdiff(required, names(raw))
-  if (length(missing) > 0L)
-    stop("Missing required column(s): ", paste(missing, collapse = ", "))
-
-  if (!is.null(chrom)) {
-    raw <- raw[raw$CHROM %in% as.character(chrom), ]
-    if (nrow(raw) == 0L) warning("No rows remain after chromosome filter.")
-  }
-
-  raw$position <- suppressWarnings(as.numeric(raw$POS))
-  raw$value    <- suppressWarnings(as.numeric(raw[[value_col]]))
-
-  ok <- !is.na(raw$position) & !is.na(raw$value)
-  if (any(!ok))
-    message(sum(!ok), " row(s) dropped (NA in POS or ", value_col, ").")
-
-  raw[ok, ][order(raw$position[ok]), ]
-}
-
-
-# ==============================================================================
-
-#' Read a REML-GPCM CSV and run physical locus merging
-#'
-#' Convenience wrapper that chains \code{\link{read_gpcm_csv}} and
-#' \code{\link{physical_merge}}, then joins the rsID of each representative
-#' SNP back to the output.
-#'
-#' @inheritParams read_gpcm_csv
-#' @inheritParams physical_merge
-#'
-#' @return The merged-block data frame from \code{\link{physical_merge}} with
-#'   additional columns \code{CHROM} and \code{rps_ID} (rsID of the
-#'   representative SNP, if an \code{ID} column is present in the input).
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' blocks <- run_physical_merge_from_csv(
-#'   path      = "stage1_ch1_P_HPI.csv",
-#'   sig_th    = 5e-8,
-#'   window    = 500000,
-#'   value_col = "P_HPI"
-#' )
-#' }
-run_physical_merge_from_csv <- function(path,
-                                        sig_th    = 5e-8,
-                                        window    = 500000,
-                                        reward    = "min",
-                                        value_col = "P_HPI",
-                                        chrom     = NULL) {
-
-  df     <- read_gpcm_csv(path, value_col = value_col, chrom = chrom)
-  blocks <- physical_merge(df, sig_th = sig_th, window = window,
-                           reward = reward)
-
-  if (nrow(blocks) > 0L && "ID" %in% names(df)) {
-    id_map        <- df[!duplicated(df$position), c("position", "CHROM", "ID")]
-    names(id_map) <- c("rps_BP", "CHROM", "rps_ID")
-    blocks        <- merge(blocks, id_map, by = "rps_BP", all.x = TRUE)
-    blocks        <- blocks[, c("serial", "CHROM", "start", "end",
-                                "rps_BP", "rps_ID", "rps_value")]
-    blocks        <- blocks[order(blocks$serial), ]
-  }
-
-  blocks
 }

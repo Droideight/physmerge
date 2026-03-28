@@ -1,0 +1,133 @@
+---
+title: "Untitled"
+author: "Pin"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Library_and_Toy_dataset}
+devtools::install_github("Droideight/physmerge")
+library(physmerge)
+
+set.seed(42)
+n <- 500
+pos <- sort(sample(1:5e6, n))
+pval <- runif(n, 0.01, 1)
+
+# Locus 1
+peak1 <- which.min(abs(pos - 1050000))
+pval[peak1 + c(-3,-2,-1,0,1,2,3)] <- c(1e-5, 1e-6, 1e-7, 1e-10, 1e-8, 1e-6, 1e-5)
+
+# Locus 2
+peak2 <- which.min(abs(pos - 2500000))
+pval[peak2 + c(-2,-1,0,1,2)] <- c(1e-6, 1e-7, 3e-9, 1e-7, 1e-6)
+
+# Locus 3 (multiple locus being close)
+peak3 <- which.min(abs(pos - 4000000))
+pval[peak3 + c(-1,0,1)]   <- c(1e-6, 2e-8, 1e-6)
+pval[peak3 + c(3,4,5)]    <- c(1e-6, 5e-9, 1e-6)
+
+toy_df <- data.frame(position = pos, value = pval)
+head(toy_df)
+```
+
+```{r Run_with_preprocess_DF}
+# -----------------------------------------------------------------------------
+# Physical Merge
+# This one is if you already have a dataframe that has position and value.
+# This function returns a list of "blocks" and the representative of each block.
+# Blocks may overlap, but representatives are guranteed to be away by 1+ window.
+# -----------------------------------------------------------------------------
+merged_toy_df <- physical_merge(
+  toy_df,        # data frame with columns position and value
+  5e-8,          # significance threshold
+  500000,        # window size in base-pairs
+  reward = "min" # "min" for p-values; "max" for test statistics
+)
+# -----------------------------------------------------------------------------
+head(merged_toy_df)
+
+# -----------------------------------------------------------------------------
+# Annotate Blocks
+# This function joins the SNP information back with the original dataset.
+# Physical merge tells you: Block 1 rep: SNP xyz, P val = p.
+# This function joins the Ref, Alt, Coefficient... information back.
+# -----------------------------------------------------------------------------
+recovered_toy_df <- annotate_blocks(
+  merged_toy_df,     # output from physical_merge()
+  toy_df,            # original input data frame (must have `position` column)
+  #chrom_col = NULL,  # chromosome column name; auto-detects CHROM / #CHROM
+  #id_col    = NULL   # SNP ID column name; auto-detects ID / SNP
+)
+# -----------------------------------------------------------------------------
+head(recovered_toy_df)
+# They are the same because our toy dataset does not load additional info, see
+# Plink cases below.
+```
+
+```{r Run_with_Plink_file}
+# -----------------------------------------------------------------------------
+# Read Sumstat
+# This function takes the output from plink, etc and convert to 2-col df.
+# -----------------------------------------------------------------------------
+plink <- read_sumstat(
+  "/Users/user/Desktop/Classes/Res Prog/Housekeeping/TE_One_CH22.plink2.HbA1c.glm.linear.assoc.txt", 
+  # path, change to a sumstat you have to test!
+  format      = "plink2",   # "plink2" / "gpcm" / "custom"
+  #value_col   = NULL,      # value column name (no need to fill in standard GWAS)
+  #chrom_col   = NULL,      # chromosome column name (no need to fill in standard GWAS)
+  #pos_col     = NULL,      # position column name (no need to fill in standard GWAS)
+  #id_col      = NULL,      # SNP ID column name (no need to fill in standard GWAS)
+  test_filter = TRUE,      # TRUE/FALSE; whether to filter by TEST column
+  test_col    = "TEST",    # name of the TEST column
+  test_val    = "ADD",     # value to retain in TEST column
+  chrom       = NULL       # 1:22 (if didn't fill, take all)
+)
+# -----------------------------------------------------------------------------
+head(plink)
+merged_plink <- physical_merge(plink$data, 5e-8, 500000, reward = "min")
+head(merged_plink)
+recovered_plink <- annotate_blocks(merged_plink, plink$data)
+head(recovered_plink)
+# You can see annotate block now produces different result.
+# "plink" has two field: data and reward. To access, plink$data is necessary.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Export SNP List
+# This function produces the SNP list needed to produce RAW in swiss army knife.
+# Can produce one file or by chromosome.
+# -----------------------------------------------------------------------------
+export_snp_list(
+  recovered_plink,   # output from annotate_blocks()
+  "/Users/user/Desktop/Classes/Res Prog/Housekeeping/snp_ids.txt",  
+  # output path (.txt or .zip)
+  by_chrom = FALSE   # FALSE = single .txt; TRUE = per-chromosome .zip
+  #id_col   = NULL   # ID column name; auto-detects rps_ID / rps_BP
+)
+# -----------------------------------------------------------------------------
+ids_check <- readLines("/Users/user/Desktop/Classes/Res Prog/Housekeeping/snp_ids.txt")
+cat("Total IDs:", length(ids_check), "\n")
+head(ids_check)
+```
+
+```{r Run_with_GPCM_file}
+# -----------------------------------------------------------------------------
+gpcm <- read_sumstat("/Users/user/Desktop/Classes/Res Prog/Housekeeping/stage1_ch1_preclump.csv", 
+  format = "gpcm", test_filter = FALSE)
+head(gpcm)
+merged_gpcm <- physical_merge(gpcm$data, 5e-8, 500000, reward = "min")
+head(merged_gpcm)
+recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data)
+head(recovered_gpcm)
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+export_snp_list(recovered_gpcm, 
+  "/Users/user/Desktop/Classes/Res Prog/Housekeeping/snp_id_gpcm.txt",  
+  by_chrom = FALSE)
+# -----------------------------------------------------------------------------
+ids_checkz <- readLines("/Users/user/Desktop/Classes/Res Prog/Housekeeping/snp_id_gpcm.txt")
+cat("Total IDs:", length(ids_checkz), "\n")
+head(ids_checkz)
+```

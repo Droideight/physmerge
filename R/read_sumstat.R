@@ -32,14 +32,17 @@
 #' @param ...       Additional arguments passed to \code{data.table::fread}
 #'   (e.g. \code{nThread}, \code{skip}).
 #'
-#' @return A named list with two elements:
+#' @return A data frame containing all original columns plus:
 #' \describe{
-#'   \item{\code{data}}{The prepared data frame with \code{position} and
-#'     \code{value} columns appended, sorted by position.}
-#'   \item{\code{reward}}{Suggested reward direction for
-#'     \code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
-#'     test statistic or \code{LOG10_P}, \code{"min"} otherwise.}
+#'   \item{\code{position}}{Numeric copy of the position column.}
+#'   \item{\code{value}}{Numeric copy of the value column.}
 #' }
+#' Rows where \code{position} or \code{value} is \code{NA} are dropped.
+#' The data frame is sorted by \code{position}.
+#'
+#' An attribute \code{"suggested_reward"} is attached: \code{"max"} if
+#' \code{value_col} is \code{"LOG10_P"} or a test statistic, \code{"min"}
+#' otherwise.  Pass this to \code{\link{physical_merge}} as \code{reward}.
 #'
 #' @export
 #'
@@ -151,10 +154,9 @@ read_sumstat <- function(path,
   suggested <- if (value_col %in% stat_cols) "max" else "min"
   if (value_col == "LOG10_P")
     message("LOG10_P detected: consider reward = 'max' for physical_merge().")
-  list(
-    data   = df,
-    reward = suggested
-  )
+  attr(df, "suggested_reward") <- suggested
+
+  df
 }
 
 # Null-coalescing operator (internal)
