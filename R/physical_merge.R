@@ -34,30 +34,32 @@
 #'     to \code{start} of the next block, guaranteeing zero overlap.
 #' }
 #'
-#' @param data   A data frame with (at least) two numeric columns:
+#' When the input contains multiple chromosomes (detected via \code{chrom_col}
+#' or an existing \code{CHROM} column), the algorithm is run independently per
+#' chromosome to prevent cross-boundary merges.
+#'
+#' @param data      A data frame with (at least) two numeric columns:
 #'   \describe{
-#'     \item{\code{position}}{Base-pair coordinate (sorted ascending
-#'       internally).}
-#'     \item{\code{value}}{Test statistic or p-value used for significance
-#'       testing.}
+#'     \item{\code{position}}{Base-pair coordinate.}
+#'     \item{\code{value}}{Test statistic or p-value.}
 #'   }
-#' @param sig_th Significance threshold (length-1 numeric).  A SNP is
-#'   significant when \code{value < sig_th} (\code{reward = "min"}) or
-#'   \code{value > sig_th} (\code{reward = "max"}).
-#' @param window Window size in base-pairs (positive numeric).  Controls how
-#'   far the algorithm searches ahead for the next signal, and how far blocks
-#'   extend on each side of their representative SNP.
-#' @param reward \code{"min"} (default) for p-values (smaller = more
-#'   significant); \code{"max"} for test statistics (larger = more
-#'   significant).
+#' @param sig_th    Significance threshold (length-1 numeric).
+#' @param window    Window size in base-pairs (positive numeric).
+#' @param reward    \code{"min"} (default) for p-values; \code{"max"} for
+#'   test statistics.
+#' @param chrom_col Name of the chromosome column in \code{data}.  If
+#'   \code{NULL} (default), the function auto-detects a column named
+#'   \code{"CHROM"}.  When a chromosome column is found and contains more
+#'   than one unique value, the algorithm runs per chromosome.
 #'
 #' @return A data frame with one row per merged locus block:
 #' \describe{
 #'   \item{\code{serial}}{Sequential block index (1, 2, 3, …).}
+#'   \item{\code{CHROM}}{Chromosome (present when a chromosome column is
+#'     detected).}
 #'   \item{\code{start}}{Block start in bp.}
 #'   \item{\code{end}}{Block end in bp.}
-#'   \item{\code{rps_BP}}{Position of the most significant (representative)
-#'     SNP in the block.}
+#'   \item{\code{rps_BP}}{Position of the most significant representative SNP.}
 #'   \item{\code{rps_value}}{Value of the representative SNP.}
 #' }
 #'
@@ -69,7 +71,8 @@
 #'   value    = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 #' )
 #' physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
-physical_merge <- function(data, sig_th, window, reward = "min") {
+physical_merge <- function(data, sig_th, window, reward = "min",
+                           chrom_col = NULL) {
   
   # ── Input validation ─────────────────────────────────────────────────────────
   if (!is.data.frame(data))
@@ -85,7 +88,56 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   if (length(window) != 1L || !is.numeric(window) || window <= 0)
     stop("`window` must be a single positive numeric value.")
   
-  # ── Sort and initialise ───────────────────────────────────────────────────────
+  # ── Per-chromosome dispatch ───────────────────────────────────────────────────
+  resolved_chrom <- if (!is.null(chrom_col)) {
+    if (!chrom_col %in% names(data))
+      stop("chrom_col '", chrom_col, "' not found in data.")
+    chrom_col
+  } else if ("CHROM" %in% names(data)) {
+    "CHROM"
+  } else {
+    NULL
+  }
+  
+  if (!is.null(resolved_chrom)) {
+    chroms <- unique(data[[resolved_chrom]])
+    if (length(chroms) > 1L) {
+      results <- lapply(chroms, function(ch) {
+        sub <- data[data[[resolved_chrom]] == ch, ]
+        blk <- .physical_merge_single(sub, sig_th, window, reward)
+        if (nrow(blk) == 0L) return(blk)
+        blk$CHROM <- ch
+        blk
+      })
+      out <- do.call(rbind, results)
+      if (is.null(out) || nrow(out) == 0L) {
+        return(data.frame(serial = integer(0), CHROM = character(0),
+                          start = numeric(0), end = numeric(0),
+                          rps_BP = numeric(0), rps_value = numeric(0)))
+      }
+      out$serial    <- seq_len(nrow(out))
+      rownames(out) <- NULL
+      col_order     <- c("serial", "CHROM",
+                         setdiff(names(out), c("serial", "CHROM")))
+      return(out[, col_order])
+    }
+  } else {
+    # No chrom info: warn if range suggests multi-chromosomal data
+    pos_range <- diff(range(data$position, na.rm = TRUE))
+    if (pos_range > 2.5e8)
+      warning("Position range > 250 Mb detected but no chromosome column found. ",
+              "If data spans multiple chromosomes, SNPs near chromosome ",
+              "boundaries may be incorrectly merged into the same block. ",
+              "Add a CHROM column or filter to one chromosome at a time.")
+  }
+  
+  .physical_merge_single(data, sig_th, window, reward)
+}
+
+
+# Internal: single-chromosome merging
+.physical_merge_single <- function(data, sig_th, window, reward) {
+  
   data <- data[order(data$position), ]
   n    <- nrow(data)
   
@@ -95,7 +147,6 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   )
   if (n == 0L) return(empty_out)
   
-  # Pre-allocate output vectors (avoids O(n²) rbind growth)
   out_serial  <- integer(n);  out_start   <- numeric(n)
   out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
   out_rps_val <- numeric(n);  block_count <- 0L
@@ -105,7 +156,6 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   sig_this_block <- sig_th
   last_pos       <- data$position[1L]
   
-  # ── Helper closures ───────────────────────────────────────────────────────────
   open_block <- function(pos, val) {
     block_count <<- block_count + 1L
     out_serial[block_count]  <<- block_count
@@ -119,13 +169,12 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   }
   
   close_block <- function(last_inblock_pos) {
-    out_end[block_count] <<- last_inblock_pos + steps  # use remaining steps, not full window
+    out_end[block_count] <<- last_inblock_pos + steps  # remaining steps, not full window
     in_block             <<- FALSE
     steps                <<- window
     sig_this_block       <<- sig_th
   }
   
-  # ── Forward scan ─────────────────────────────────────────────────────────────
   for (i in seq_len(n)) {
     pos <- data$position[i]
     val <- data$value[i]
@@ -164,10 +213,8 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
     stringsAsFactors = FALSE
   )
   
-  # ── Collapse pass ─────────────────────────────────────────────────────────────
   blk <- .collapse_blocks(raw_blocks, window, reward)
   
-  # ── Trim pass ────────────────────────────────────────────────────────────────
   if (nrow(blk) > 1L) {
     for (i in seq_len(nrow(blk) - 1L)) {
       if (blk$end[i] > blk$start[i + 1L])
@@ -179,7 +226,7 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
 }
 
 
-# Internal: collapse pass — merge blocks whose rps_BP are < window apart
+# Internal: collapse pass
 .collapse_blocks <- function(blk, w, reward) {
   if (nrow(blk) <= 1L) return(blk)
   out <- blk[1L, ]
