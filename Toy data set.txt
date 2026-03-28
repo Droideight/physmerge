@@ -1,0 +1,25 @@
+set.seed(42)
+
+n <- 500
+pos <- sort(sample(1:5e6, n))
+pval <- runif(n, 0.01, 1)
+
+# Locus 1：peak 1,050,000
+peak1 <- which.min(abs(pos - 1050000))
+pval[peak1 + c(-3,-2,-1,0,1,2,3)] <- c(1e-5, 1e-6, 1e-7, 1e-10, 1e-8, 1e-6, 1e-5)
+
+# Locus 2：peak 2,500,000
+peak2 <- which.min(abs(pos - 2500000))
+pval[peak2 + c(-2,-1,0,1,2)] <- c(1e-6, 1e-7, 3e-9, 1e-7, 1e-6)
+
+# Locus 3：two peaks
+peak3 <- which.min(abs(pos - 4000000))
+pval[peak3 + c(-1,0,1)]   <- c(1e-6, 2e-8, 1e-6) # first peak
+pval[peak3 + c(3,4,5)]    <- c(1e-6, 5e-9, 1e-6) # close to previous
+
+toy_df <- data.frame(
+  position = pos,
+  value    = pval
+)
+
+head(toy_df)
