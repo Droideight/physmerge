@@ -1,0 +1,291 @@
+---
+title: "physmerge: Manual"
+author: "Pin"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = FALSE)
+```
+
+---
+
+## Overview
+
+`physmerge` collapses overlapping genomic signals into non-overlapping locus
+blocks using a **forward sliding-window** approach — no LD reference panel
+required.
+
+### When to use this package
+
+- You have GWAS summary statistics and want to identify independent loci
+- You do not have access to a genotype-level LD reference panel for proper
+  LD clumping
+- You want a reproducible, fast, programmatic alternative to manual locus
+  inspection
+
+### Installation
+
+```{r install, eval=FALSE}
+devtools::install_github("Droideight/physmerge")
+```
+
+```{r library}
+library(physmerge)
+```
+
+---
+
+## Function reference
+
+| Function | Input | Output | Purpose |
+|---|---|---|---|
+| `read_sumstat()` | File path | `list(data, reward)` | Read PLINK2 / GPCM / custom sumstats |
+| `physical_merge()` | data frame | Blocks data frame | Run the merging algorithm |
+| `annotate_blocks()` | Blocks + original data | Annotated blocks | Join full SNP info back to blocks |
+| `export_snp_list()` | Annotated blocks | `.txt` or `.zip` | Export representative SNP IDs |
+
+---
+
+## Algorithm
+
+The algorithm runs in three passes:
+
+1. **Forward scan** — opens a block when a significant SNP is encountered.
+   The block stays alive as long as the next SNP is within `window` bp.
+   Whenever a more significant SNP is found inside the block, it becomes the
+   new representative and the window resets.
+
+2. **Collapse pass** — merges adjacent blocks whose representative SNPs
+   (`rps_BP`) are fewer than `window` bp apart, keeping the more significant
+   representative.
+
+3. **Trim pass** — if any block's `end` still overlaps the next block's
+   `start` after collapsing, `end` is trimmed to `start` of the next block,
+   guaranteeing zero overlap.
+
+---
+
+## Case 1: Pre-processed data frame
+
+Use `physical_merge()` directly when you already have a data frame with
+`position` and `value` columns.
+
+### Toy dataset
+
+```{r toy_dataset}
+set.seed(42)
+n   <- 500
+pos <- sort(sample(1:5e6, n))
+pval <- runif(n, 0.01, 1)
+
+# Locus 1: single clean peak around 1.05 Mb
+peak1 <- which.min(abs(pos - 1050000))
+pval[peak1 + c(-3,-2,-1,0,1,2,3)] <- c(1e-5, 1e-6, 1e-7, 1e-10, 1e-8, 1e-6, 1e-5)
+
+# Locus 2: single clean peak around 2.5 Mb
+peak2 <- which.min(abs(pos - 2500000))
+pval[peak2 + c(-2,-1,0,1,2)] <- c(1e-6, 1e-7, 3e-9, 1e-7, 1e-6)
+
+# Locus 3: two nearby sub-peaks around 4 Mb — should be collapsed into one block
+peak3 <- which.min(abs(pos - 4000000))
+pval[peak3 + c(-1,0,1)] <- c(1e-6, 2e-8, 1e-6)   # sub-peak A
+pval[peak3 + c(3,4,5)]  <- c(1e-6, 5e-9, 1e-6)   # sub-peak B (closer → collapsed)
+
+toy_df <- data.frame(position = pos, value = pval)
+head(toy_df)
+```
+
+### Run merging
+
+```{r merge_toy}
+merged_toy <- physical_merge(
+  toy_df,          # data frame with columns `position` and `value`
+  sig_th = 5e-8,   # significance threshold
+  window = 500000, # window size in base-pairs
+  reward = "min"   # "min" for p-values; "max" for test statistics
+)
+merged_toy
+```
+
+We expect **3 blocks**: Locus 1, Locus 2, and Locus 3 (two sub-peaks
+collapsed into one, with the stronger `5e-9` SNP as representative).
+
+### Annotate blocks
+
+`annotate_blocks()` joins the full original columns back to each block row.
+For the toy dataset this adds nothing new, but for real data it brings in
+`BETA`, `SE`, `REF`, `ALT`, etc.
+
+```{r annotate_toy}
+recovered_toy <- annotate_blocks(
+  merged_toy,  # output from physical_merge()
+  toy_df       # original data frame (must have `position` column)
+)
+recovered_toy
+```
+
+The `keep_*` parameters let you drop columns you do not need downstream:
+
+```{r annotate_toy_slim, eval=FALSE}
+# Drop start/end/rps_value — keep serial, rps_BP, rps_ID only
+annotate_blocks(merged_toy, toy_df,
+                keep_start     = FALSE,
+                keep_end       = FALSE,
+                keep_rps_value = FALSE)
+```
+
+---
+
+## Case 2: PLINK2 summary statistics
+
+`read_sumstat()` reads the file, filters to `TEST == "ADD"` rows (default
+for PLINK2), and returns `list(data, reward)`.
+
+```{r plink, eval=FALSE}
+plink <- read_sumstat(
+  "path/to/your.glm.linear",
+  format      = "plink2",  # expects #CHROM, POS, ID, P
+  test_filter = TRUE,       # keep only ADD rows (default for plink2)
+  test_col    = "TEST",
+  test_val    = "ADD",
+  chrom       = NULL        # set e.g. chrom = 1:22 to restrict chromosomes
+)
+
+# plink is a list — data lives in plink$data
+head(plink$data)
+
+merged_plink    <- physical_merge(plink$data, 5e-8, 500000,
+                                  reward = plink$reward)
+recovered_plink <- annotate_blocks(merged_plink, plink$data)
+head(recovered_plink)
+```
+
+Export the representative SNP list:
+
+```{r plink_export, eval=FALSE}
+# Single merged file
+export_snp_list(recovered_plink, "snp_ids.txt")
+
+# Verify
+ids <- readLines("snp_ids.txt")
+cat("Blocks:", nrow(recovered_plink), "| IDs written:", length(ids), "\n")
+head(ids)
+```
+
+---
+
+## Case 3: REML-GPCM per-SNP file
+
+GPCM output has multiple p-value columns. Choose one with `value_col`.
+
+```{r gpcm, eval=FALSE}
+gpcm <- read_sumstat(
+  "path/to/stage1_ch1_preclump.csv",
+  format      = "gpcm",
+  value_col   = "P_HPI",   # or "P_Direct", "P_Indirect", "P_TE"
+  test_filter = FALSE       # GPCM files do not have a TEST column
+)
+
+head(gpcm$data)
+
+merged_gpcm    <- physical_merge(gpcm$data, 5e-8, 500000,
+                                 reward = gpcm$reward)
+recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data)
+head(recovered_gpcm)
+
+export_snp_list(recovered_gpcm, "snp_ids_gpcm.txt")
+
+ids <- readLines("snp_ids_gpcm.txt")
+cat("Blocks:", nrow(recovered_gpcm), "| IDs written:", length(ids), "\n")
+head(ids)
+```
+
+---
+
+## Case 4: Custom file format
+
+When your file uses non-standard column names, use `format = "custom"` and
+specify every column explicitly.
+
+```{r custom, eval=FALSE}
+custom <- read_sumstat(
+  "path/to/results.txt",
+  format    = "custom",
+  chrom_col = "CHR",
+  pos_col   = "BP",
+  id_col    = "SNP",
+  value_col = "P"
+)
+```
+
+---
+
+## Exporting by chromosome
+
+When you need one SNP list per chromosome (e.g. for Swiss Army Knife RAW
+extraction on UKB-RAP):
+
+```{r export_bychr, eval=FALSE}
+export_snp_list(recovered_plink, "snp_ids_by_chr.zip", by_chrom = TRUE)
+# Produces: snp_ch1.txt, snp_ch2.txt, ... bundled in a zip
+```
+
+---
+
+## Parameter reference
+
+### `read_sumstat()`
+
+| Parameter | Default | Description |
+|---|---|---|
+| `path` | — | Path to input file |
+| `format` | `"plink2"` | `"plink2"` / `"gpcm"` / `"custom"` |
+| `value_col` | format default | Column to use as merging value |
+| `chrom_col` | format default | Chromosome column name |
+| `pos_col` | format default | Position column name |
+| `id_col` | format default | SNP ID column name |
+| `test_filter` | format default | Filter rows by TEST column |
+| `test_col` | `"TEST"` | TEST column name |
+| `test_val` | `"ADD"` | Value to retain in TEST column |
+| `chrom` | `NULL` | Chromosomes to keep, e.g. `1:22` |
+
+### `physical_merge()`
+
+| Parameter | Default | Description |
+|---|---|---|
+| `data` | — | data frame with `position` and `value` columns |
+| `sig_th` | — | Significance threshold |
+| `window` | — | Window size in base-pairs |
+| `reward` | `"min"` | `"min"` for p-values; `"max"` for test statistics |
+
+### `annotate_blocks()`
+
+| Parameter | Default | Description |
+|---|---|---|
+| `blocks` | — | Output from `physical_merge()` |
+| `data` | — | Original input data frame |
+| `chrom_col` | `NULL` | Auto-detects `CHROM` / `#CHROM` |
+| `id_col` | `NULL` | Auto-detects `ID` / `SNP` |
+| `keep_serial` | `TRUE` | Include `serial` column |
+| `keep_start` | `TRUE` | Include `start` column |
+| `keep_end` | `TRUE` | Include `end` column |
+| `keep_rps_BP` | `TRUE` | Include `rps_BP` column |
+| `keep_rps_value` | `TRUE` | Include `rps_value` column |
+| `keep_rps_ID` | `TRUE` | Include `rps_ID` column |
+
+### `export_snp_list()`
+
+| Parameter | Default | Description |
+|---|---|---|
+| `blocks` | — | Output from `annotate_blocks()` |
+| `path` | — | Output file path (`.txt` or `.zip`) |
+| `by_chrom` | `FALSE` | `TRUE` = per-chromosome zip |
+| `id_col` | `NULL` | Auto-detects `rps_ID` then `rps_BP` |

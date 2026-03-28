@@ -154,10 +154,9 @@ read_sumstat <- function(path,
   suggested <- if (value_col %in% stat_cols) "max" else "min"
   if (value_col == "LOG10_P")
     message("LOG10_P detected: consider reward = 'max' for physical_merge().")
-  list(
-    data   = df,
-    reward = suggested
-  )
+  attr(df, "suggested_reward") <- suggested
+
+  df
 }
 
 # Null-coalescing operator (internal)

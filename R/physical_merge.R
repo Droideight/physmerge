@@ -119,7 +119,7 @@ physical_merge <- function(data, sig_th, window, reward = "min") {
   }
 
   close_block <- function(last_inblock_pos) {
-    out_end[block_count] <<- last_inblock_pos + window
+    out_end[block_count] <<- last_inblock_pos + steps  # use remaining steps, not full window
     in_block             <<- FALSE
     steps                <<- window
     sig_this_block       <<- sig_th

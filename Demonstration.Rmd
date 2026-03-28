@@ -1,5 +1,5 @@
 ---
-title: "physmerge_demonstration"
+title: "physmerge Demonstration"
 author: "Pin"
 date: "`r Sys.Date()`"
 output: html_document
@@ -84,13 +84,10 @@ plink <- read_sumstat(
   chrom       = NULL       # 1:22 (if didn't fill, take all)
 )
 # -----------------------------------------------------------------------------
-head(plink)
+head(plink$data)
 merged_plink <- physical_merge(plink$data, 5e-8, 500000, reward = "min")
 head(merged_plink)
-recovered_plink <- annotate_blocks(merged_plink, plink$data, 
-                                   keep_serial = FALSE, keep_start = FALSE, 
-                                   keep_end = FALSE, keep_rps_BP = FALSE,
-                                   keep_rps_value = FALSE, keep_rps_ID = FALSE)
+recovered_plink <- annotate_blocks(merged_plink, plink$data)
 head(recovered_plink)
 # You can see annotate block now produces different result.
 # "plink" has two field: data and reward. To access, plink$data is necessary.
@@ -118,13 +115,10 @@ head(ids_check)
 # -----------------------------------------------------------------------------
 gpcm <- read_sumstat("/Users/user/Desktop/Classes/Res Prog/Housekeeping/stage1_ch1_preclump.csv", 
   format = "gpcm", test_filter = FALSE)
-head(gpcm)
+head(gpcm$data)
 merged_gpcm <- physical_merge(gpcm$data, 5e-8, 500000, reward = "min")
 head(merged_gpcm)
-recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data, 
-                                  keep_serial = FALSE, keep_start = FALSE, 
-                                  keep_end = FALSE, keep_rps_BP = FALSE,
-                                  keep_rps_value = FALSE, keep_rps_ID = FALSE)
+recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data)
 head(recovered_gpcm)
 # -----------------------------------------------------------------------------
 
