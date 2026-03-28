@@ -73,9 +73,9 @@ read_sumstat <- function(path,
                          test_val    = "ADD",
                          chrom       = NULL,
                          ...) {
-
+  
   format <- match.arg(format)
-
+  
   # ── Format-specific defaults ──────────────────────────────────────────────────
   defaults <- list(
     plink2 = list(chrom = "#CHROM", pos = "POS", id = "ID",
@@ -85,16 +85,16 @@ read_sumstat <- function(path,
     custom = list(chrom = NULL,     pos = NULL,  id = NULL,
                   value = NULL,     test_filter = FALSE)
   )[[format]]
-
+  
   chrom_col   <- chrom_col   %||% defaults$chrom
   pos_col     <- pos_col     %||% defaults$pos
   id_col      <- id_col      %||% defaults$id
   value_col   <- value_col   %||% defaults$value
   test_filter <- test_filter %||% defaults$test_filter
-
+  
   if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
     stop("For format = 'custom', you must supply chrom_col, pos_col, and value_col.")
-
+  
   # ── Read (fread auto-detects separator) ───────────────────────────────────────
   df <- tryCatch(
     as.data.frame(data.table::fread(path, header = TRUE,
@@ -102,18 +102,18 @@ read_sumstat <- function(path,
                                     data.table = FALSE, ...)),
     error = function(e) stop("Failed to read file: ", conditionMessage(e))
   )
-
+  
   # Normalise #CHROM → CHROM everywhere
   names(df)[names(df) == "#CHROM"] <- "CHROM"
   if (chrom_col == "#CHROM") chrom_col <- "CHROM"
-
+  
   # ── Validate columns ──────────────────────────────────────────────────────────
   needed <- c(chrom_col, pos_col, value_col)
   if (!is.na(id_col)) needed <- c(needed, id_col)
   missing <- setdiff(needed, names(df))
   if (length(missing) > 0L)
     stop("Column(s) not found: ", paste(missing, collapse = ", "))
-
+  
   # ── TEST column filter ────────────────────────────────────────────────────────
   if (isTRUE(test_filter)) {
     if (!test_col %in% names(df)) {
@@ -127,27 +127,27 @@ read_sumstat <- function(path,
         stop("No rows remain after TEST filter.")
     }
   }
-
+  
   # ── Chromosome filter ─────────────────────────────────────────────────────────
   if (!is.null(chrom)) {
     df <- df[as.character(df[[chrom_col]]) %in% as.character(chrom), ]
     if (nrow(df) == 0L) warning("No rows remain after chromosome filter.")
   }
-
+  
   # ── Append interface columns ──────────────────────────────────────────────────
   df$position <- suppressWarnings(as.numeric(df[[pos_col]]))
   df$value    <- suppressWarnings(as.numeric(df[[value_col]]))
-
+  
   ok <- !is.na(df$position) & !is.na(df$value)
   if (any(!ok))
     message(sum(!ok), " row(s) dropped (NA in position or value).")
   df <- df[ok, ]
-
+  
   if (nrow(df) == 0L)
     stop("No usable rows after filtering.")
-
+  
   df <- df[order(df$position), ]
-
+  
   # ── Suggest reward direction ──────────────────────────────────────────────────
   stat_cols <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
                  "T_STAT_Direct", "T_STAT_TE", "HPI")
@@ -155,7 +155,7 @@ read_sumstat <- function(path,
   if (value_col == "LOG10_P")
     message("LOG10_P detected: consider reward = 'max' for physical_merge().")
   attr(df, "suggested_reward") <- suggested
-
+  
   df
 }
 

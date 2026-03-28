@@ -41,48 +41,48 @@
 #'                 keep_start = FALSE, keep_end = FALSE, keep_rps_value = FALSE)
 #' }
 annotate_blocks <- function(blocks, data,
-                             chrom_col       = NULL,
-                             id_col          = NULL,
-                             keep_serial     = TRUE,
-                             keep_start      = TRUE,
-                             keep_end        = TRUE,
-                             keep_rps_BP     = TRUE,
-                             keep_rps_value  = TRUE,
-                             keep_rps_ID     = TRUE) {
-
+                            chrom_col       = NULL,
+                            id_col          = NULL,
+                            keep_serial     = TRUE,
+                            keep_start      = TRUE,
+                            keep_end        = TRUE,
+                            keep_rps_BP     = TRUE,
+                            keep_rps_value  = TRUE,
+                            keep_rps_ID     = TRUE) {
+  
   if (nrow(blocks) == 0L) return(blocks)
   if (!"position" %in% names(data))
     stop("`data` must contain a 'position' column.")
-
+  
   # Resolve chrom column
   if (is.null(chrom_col))
     chrom_col <- if ("CHROM" %in% names(data)) "CHROM" else
-                 if ("#CHROM" %in% names(data)) "#CHROM" else NULL
-
+      if ("#CHROM" %in% names(data)) "#CHROM" else NULL
+  
   # Resolve ID column
   if (is.null(id_col))
     id_col <- if ("ID" %in% names(data)) "ID" else
-              if ("SNP" %in% names(data)) "SNP" else NA
-
+      if ("SNP" %in% names(data)) "SNP" else NA
+  
   # Deduplicate data on position
   data_dedup      <- data[!duplicated(data$position), ]
   repr            <- data_dedup[data_dedup$position %in% blocks$rps_BP, ]
   repr$rps_BP     <- repr$position
-
+  
   # Add rps_ID if available
   has_id <- !is.na(id_col) && id_col %in% names(repr)
   if (has_id) repr$rps_ID <- repr[[id_col]]
-
+  
   # Columns to bring in from original data
   join_cols <- c("rps_BP",
                  if (!is.null(chrom_col) && chrom_col %in% names(repr)) chrom_col,
                  if (has_id) "rps_ID")
   extra     <- setdiff(names(repr), c(join_cols, "position", "value", id_col))
   repr      <- repr[, c(join_cols, extra), drop = FALSE]
-
+  
   # Merge
   out <- merge(blocks, repr, by = "rps_BP", all.x = TRUE)
-
+  
   # Build ordered column list based on keep_* flags
   meta <- c(
     if (keep_serial)    "serial",
@@ -94,8 +94,8 @@ annotate_blocks <- function(blocks, data,
     if (keep_rps_value) "rps_value"
   )
   rest <- setdiff(names(out), c(meta,
-                                 "serial", "start", "end",
-                                 "rps_BP", "rps_ID", "rps_value"))
+                                "serial", "start", "end",
+                                "rps_BP", "rps_ID", "rps_value"))
   out  <- out[, c(meta, rest), drop = FALSE]
   out[order(out$serial), ]
 }
@@ -133,44 +133,44 @@ annotate_blocks <- function(blocks, data,
 #' export_snp_list(blocks, "snp_ids_by_chr.zip", by_chrom = TRUE)
 #' }
 export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
-
+  
   if (nrow(blocks) == 0L) {
     warning("No blocks to export.")
     return(invisible(path))
   }
-
+  
   if (is.null(id_col))
     id_col <- if ("rps_ID" %in% names(blocks)) "rps_ID" else "rps_BP"
   if (!id_col %in% names(blocks))
     stop("Column '", id_col, "' not found in blocks.")
-
+  
   ids <- as.character(blocks[[id_col]])
-
+  
   if (!by_chrom) {
     writeLines(ids, path)
     message("Wrote ", length(ids), " IDs to ", path)
-
+    
   } else {
     if (!"CHROM" %in% names(blocks))
       stop("by_chrom = TRUE requires a 'CHROM' column in blocks.")
-
+    
     tmp_dir <- tempfile(pattern = "physmerge_export_")
     dir.create(tmp_dir)
     on.exit(unlink(tmp_dir, recursive = TRUE))
-
+    
     chroms <- sort(unique(as.character(blocks$CHROM)))
     for (ch in chroms) {
       ch_ids  <- ids[as.character(blocks$CHROM) == ch]
       writeLines(ch_ids, file.path(tmp_dir, paste0("snp_ch", ch, ".txt")))
     }
-
+    
     old_wd <- getwd()
     setwd(tmp_dir)
     utils::zip(path, files = list.files(tmp_dir), flags = "-j")
     setwd(old_wd)
-
+    
     message("Wrote ", length(chroms), " chromosome file(s) to ", path)
   }
-
+  
   invisible(path)
 }
