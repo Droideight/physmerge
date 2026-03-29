@@ -9,7 +9,7 @@ physical_merge(data, sig_th, window, reward = "min", chrom_col = NULL)
 \arguments{
 \item{data}{A data frame with (at least) two numeric columns:
 \describe{
-\item{\code{position}}{Base-pair coordinate.}
+\item{\code{position}}{Base-pair coordinate, resorted internally.}
 \item{\code{value}}{Test statistic or p-value.}
 }}
 
@@ -47,13 +47,13 @@ The algorithm works in three passes:
 
 \enumerate{
 \item \strong{Forward scan}: opens a block when a significant SNP is
-encountered and keeps it alive as long as the next SNP falls within
-\code{window} bp of the previous one.  Whenever a more significant SNP
-is found inside the block, it becomes the new representative and the
-window resets.
+encountered and keeps it alive as long as the next (more significant)
+SNP falls within \code{window} bp of the previous one.  Whenever a more
+significant SNP is found inside the block, it becomes the new
+representative and the "steps remaining" resets.
 \item \strong{Collapse pass}: merges adjacent blocks whose representative
 SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
-the more significant representative.
+the more significant representative. Currently unlikely to trigger.
 \item \strong{Trim pass}: if after collapsing any block's \code{end}
 still overlaps the next block's \code{start}, the \code{end} is trimmed
 to \code{start} of the next block, guaranteeing zero overlap.

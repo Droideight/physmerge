@@ -1664,6 +1664,10 @@ still overlaps the next block’s <code>start</code> after collapsing,
 <code>end</code> is trimmed to <code>start</code> of the next block,
 guaranteeing zero overlap.</p></li>
 </ol>
+<p>When the input contains multiple chromosomes (detected via a
+<code>CHROM</code> column), the algorithm runs independently per
+chromosome to prevent cross-boundary merges. If no chromosome column is
+found but the position range exceeds 250 Mb, a warning is issued.</p>
 <hr />
 </div>
 <div id="case-1-pre-processed-data-frame" class="section level2">
@@ -1711,9 +1715,9 @@ columns.</p>
 <span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>)</span>
 <span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a>merged_toy</span></code></pre></div>
 <pre><code>##   serial   start     end  rps_BP rps_value
-## 1      1  548812 1994140 1048812     1e-10
-## 2      2 1994140 3489935 2494140     3e-09
-## 3      3 3509893 5033996 4040084     5e-09</code></pre>
+## 1      1  548812 1548812 1048812     1e-10
+## 2      2 1994140 2994140 2494140     3e-09
+## 3      3 3509893 4540084 4040084     5e-09</code></pre>
 <p>We expect <strong>3 blocks</strong>: Locus 1, Locus 2, and Locus 3
 (two sub-peaks collapsed into one, with the stronger <code>5e-9</code>
 SNP as representative).</p>
@@ -1730,9 +1734,9 @@ real data it brings in <code>BETA</code>, <code>SE</code>,
 <span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>)</span>
 <span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a>recovered_toy</span></code></pre></div>
 <pre><code>##   serial   start     end  rps_BP rps_value
-## 1      1  548812 1994140 1048812     1e-10
-## 2      2 1994140 3489935 2494140     3e-09
-## 3      3 3509893 5033996 4040084     5e-09</code></pre>
+## 1      1  548812 1548812 1048812     1e-10
+## 2      2 1994140 2994140 2494140     3e-09
+## 3      3 3509893 4540084 4040084     5e-09</code></pre>
 <p>The <code>keep_*</code> parameters let you drop columns you do not
 need downstream:</p>
 <div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="co"># Drop start/end/rps_value — keep serial, rps_BP, rps_ID only</span></span>
@@ -1760,10 +1764,11 @@ need downstream:</p>
 <span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a><span class="co"># plink is a list — data lives in plink$data</span></span>
 <span id="cb10-11"><a href="#cb10-11" tabindex="-1"></a><span class="fu">head</span>(plink<span class="sc">$</span>data)</span>
 <span id="cb10-12"><a href="#cb10-12" tabindex="-1"></a></span>
-<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a>merged_plink    <span class="ot">&lt;-</span> <span class="fu">physical_merge</span>(plink<span class="sc">$</span>data, <span class="fl">5e-8</span>, <span class="dv">500000</span>,</span>
-<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a>                                  <span class="at">reward =</span> plink<span class="sc">$</span>reward)</span>
-<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a>recovered_plink <span class="ot">&lt;-</span> <span class="fu">annotate_blocks</span>(merged_plink, plink<span class="sc">$</span>data)</span>
-<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a><span class="fu">head</span>(recovered_plink)</span></code></pre></div>
+<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a><span class="co"># CHROM column is auto-detected — physical_merge runs per chromosome automatically</span></span>
+<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a>merged_plink    <span class="ot">&lt;-</span> <span class="fu">physical_merge</span>(plink<span class="sc">$</span>data, <span class="fl">5e-8</span>, <span class="dv">500000</span>,</span>
+<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a>                                  <span class="at">reward =</span> plink<span class="sc">$</span>reward)</span>
+<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a>recovered_plink <span class="ot">&lt;-</span> <span class="fu">annotate_blocks</span>(merged_plink, plink<span class="sc">$</span>data)</span>
+<span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="fu">head</span>(recovered_plink)</span></code></pre></div>
 <p>Export the representative SNP list:</p>
 <div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a><span class="co"># Single merged file</span></span>
 <span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a><span class="fu">export_snp_list</span>(recovered_plink, <span class="st">&quot;snp_ids.txt&quot;</span>)</span>
@@ -1787,16 +1792,17 @@ need downstream:</p>
 <span id="cb12-7"><a href="#cb12-7" tabindex="-1"></a></span>
 <span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="fu">head</span>(gpcm<span class="sc">$</span>data)</span>
 <span id="cb12-9"><a href="#cb12-9" tabindex="-1"></a></span>
-<span id="cb12-10"><a href="#cb12-10" tabindex="-1"></a>merged_gpcm    <span class="ot">&lt;-</span> <span class="fu">physical_merge</span>(gpcm<span class="sc">$</span>data, <span class="fl">5e-8</span>, <span class="dv">500000</span>,</span>
-<span id="cb12-11"><a href="#cb12-11" tabindex="-1"></a>                                 <span class="at">reward =</span> gpcm<span class="sc">$</span>reward)</span>
-<span id="cb12-12"><a href="#cb12-12" tabindex="-1"></a>recovered_gpcm <span class="ot">&lt;-</span> <span class="fu">annotate_blocks</span>(merged_gpcm, gpcm<span class="sc">$</span>data)</span>
-<span id="cb12-13"><a href="#cb12-13" tabindex="-1"></a><span class="fu">head</span>(recovered_gpcm)</span>
-<span id="cb12-14"><a href="#cb12-14" tabindex="-1"></a></span>
-<span id="cb12-15"><a href="#cb12-15" tabindex="-1"></a><span class="fu">export_snp_list</span>(recovered_gpcm, <span class="st">&quot;snp_ids_gpcm.txt&quot;</span>)</span>
-<span id="cb12-16"><a href="#cb12-16" tabindex="-1"></a></span>
-<span id="cb12-17"><a href="#cb12-17" tabindex="-1"></a>ids <span class="ot">&lt;-</span> <span class="fu">readLines</span>(<span class="st">&quot;snp_ids_gpcm.txt&quot;</span>)</span>
-<span id="cb12-18"><a href="#cb12-18" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;Blocks:&quot;</span>, <span class="fu">nrow</span>(recovered_gpcm), <span class="st">&quot;| IDs written:&quot;</span>, <span class="fu">length</span>(ids), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
-<span id="cb12-19"><a href="#cb12-19" tabindex="-1"></a><span class="fu">head</span>(ids)</span></code></pre></div>
+<span id="cb12-10"><a href="#cb12-10" tabindex="-1"></a><span class="co"># CHROM column is auto-detected — physical_merge runs per chromosome automatically</span></span>
+<span id="cb12-11"><a href="#cb12-11" tabindex="-1"></a>merged_gpcm    <span class="ot">&lt;-</span> <span class="fu">physical_merge</span>(gpcm<span class="sc">$</span>data, <span class="fl">5e-8</span>, <span class="dv">500000</span>,</span>
+<span id="cb12-12"><a href="#cb12-12" tabindex="-1"></a>                                 <span class="at">reward =</span> gpcm<span class="sc">$</span>reward)</span>
+<span id="cb12-13"><a href="#cb12-13" tabindex="-1"></a>recovered_gpcm <span class="ot">&lt;-</span> <span class="fu">annotate_blocks</span>(merged_gpcm, gpcm<span class="sc">$</span>data)</span>
+<span id="cb12-14"><a href="#cb12-14" tabindex="-1"></a><span class="fu">head</span>(recovered_gpcm)</span>
+<span id="cb12-15"><a href="#cb12-15" tabindex="-1"></a></span>
+<span id="cb12-16"><a href="#cb12-16" tabindex="-1"></a><span class="fu">export_snp_list</span>(recovered_gpcm, <span class="st">&quot;snp_ids_gpcm.txt&quot;</span>)</span>
+<span id="cb12-17"><a href="#cb12-17" tabindex="-1"></a></span>
+<span id="cb12-18"><a href="#cb12-18" tabindex="-1"></a>ids <span class="ot">&lt;-</span> <span class="fu">readLines</span>(<span class="st">&quot;snp_ids_gpcm.txt&quot;</span>)</span>
+<span id="cb12-19"><a href="#cb12-19" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;Blocks:&quot;</span>, <span class="fu">nrow</span>(recovered_gpcm), <span class="st">&quot;| IDs written:&quot;</span>, <span class="fu">length</span>(ids), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
+<span id="cb12-20"><a href="#cb12-20" tabindex="-1"></a><span class="fu">head</span>(ids)</span></code></pre></div>
 <hr />
 </div>
 <div id="case-4-custom-file-format" class="section level2">
@@ -1925,6 +1931,12 @@ columns</td>
 <td><code>&quot;min&quot;</code></td>
 <td><code>&quot;min&quot;</code> for p-values; <code>&quot;max&quot;</code> for test
 statistics</td>
+</tr>
+<tr class="odd">
+<td><code>chrom_col</code></td>
+<td><code>NULL</code></td>
+<td>Chromosome column name; auto-detects <code>CHROM</code>; runs per
+chromosome automatically when multiple values are found</td>
 </tr>
 </tbody>
 </table>

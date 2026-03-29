@@ -21,7 +21,7 @@ annotate_blocks(
 \item{blocks}{Data frame returned by \code{\link{physical_merge}}.}
 
 \item{data}{The original input data frame passed to
-\code{\link{read_sumstat}}.  Must contain a \code{position} column.}
+\code{\link{read_sumstat$data}}.  Must contain a \code{position} column.}
 
 \item{chrom_col}{Name of the chromosome column in \code{data}.  If
 \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.}
@@ -49,7 +49,7 @@ each representative SNP row, with block metadata columns selectively
 retained based on \code{keep_*} arguments.
 }
 \description{
-Joins the original input data back to the merged block table on
+Joins the original input data back to the merged block table on \code{CHROM},
 \code{rps_BP}, returning one row per block containing all original columns
 for the representative SNP.  Block metadata columns (\code{serial},
 \code{start}, \code{end}, \code{rps_BP}, \code{rps_value}) can be

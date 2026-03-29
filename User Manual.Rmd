@@ -71,6 +71,11 @@ The algorithm runs in three passes:
    `start` after collapsing, `end` is trimmed to `start` of the next block,
    guaranteeing zero overlap.
 
+When the input contains multiple chromosomes (detected via a `CHROM` column),
+the algorithm runs independently per chromosome to prevent cross-boundary
+merges. If no chromosome column is found but the position range exceeds 250 Mb,
+a warning is issued.
+
 ---
 
 ## Case 1: Pre-processed data frame
@@ -162,6 +167,7 @@ plink <- read_sumstat(
 # plink is a list — data lives in plink$data
 head(plink$data)
 
+# CHROM column is auto-detected — physical_merge runs per chromosome automatically
 merged_plink    <- physical_merge(plink$data, 5e-8, 500000,
                                   reward = plink$reward)
 recovered_plink <- annotate_blocks(merged_plink, plink$data)
@@ -196,6 +202,7 @@ gpcm <- read_sumstat(
 
 head(gpcm$data)
 
+# CHROM column is auto-detected — physical_merge runs per chromosome automatically
 merged_gpcm    <- physical_merge(gpcm$data, 5e-8, 500000,
                                  reward = gpcm$reward)
 recovered_gpcm <- annotate_blocks(merged_gpcm, gpcm$data)
@@ -265,6 +272,7 @@ export_snp_list(recovered_plink, "snp_ids_by_chr.zip", by_chrom = TRUE)
 | `sig_th` | — | Significance threshold |
 | `window` | — | Window size in base-pairs |
 | `reward` | `"min"` | `"min"` for p-values; `"max"` for test statistics |
+| `chrom_col` | `NULL` | Chromosome column name; auto-detects `CHROM`; runs per chromosome automatically when multiple values are found |
 
 ### `annotate_blocks()`
 

@@ -1,6 +1,6 @@
 #' Annotate merged blocks with full rows from the original input
 #'
-#' Joins the original input data back to the merged block table on
+#' Joins the original input data back to the merged block table on \code{CHROM},
 #' \code{rps_BP}, returning one row per block containing all original columns
 #' for the representative SNP.  Block metadata columns (\code{serial},
 #' \code{start}, \code{end}, \code{rps_BP}, \code{rps_value}) can be
@@ -8,7 +8,7 @@
 #'
 #' @param blocks    Data frame returned by \code{\link{physical_merge}}.
 #' @param data      The original input data frame passed to
-#'   \code{\link{read_sumstat}}.  Must contain a \code{position} column.
+#'   \code{\link{read_sumstat$data}}.  Must contain a \code{position} column.
 #' @param chrom_col Name of the chromosome column in \code{data}.  If
 #'   \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.
 #' @param id_col    Name of the SNP ID column in \code{data} used to populate
@@ -48,6 +48,10 @@ annotate_blocks <- function(blocks, data,
                             keep_end        = TRUE,
                             keep_rps_BP     = TRUE,
                             keep_rps_value  = TRUE,
+                            # note, although function to toggle false/true is
+                            # given, if annotate_blocks is not use terminally,
+                            # this should always be set to true as rps_BP is
+                            # used when mergining external information.
                             keep_rps_ID     = TRUE) {
   
   if (nrow(blocks) == 0L) return(blocks)
@@ -58,6 +62,7 @@ annotate_blocks <- function(blocks, data,
   if (is.null(chrom_col))
     chrom_col <- if ("CHROM" %in% names(data)) "CHROM" else
       if ("#CHROM" %in% names(data)) "#CHROM" else NULL
+  # reading #CHROM is provided in case user did not use read_sumstat
   
   # Resolve ID column
   if (is.null(id_col))
@@ -65,8 +70,21 @@ annotate_blocks <- function(blocks, data,
       if ("SNP" %in% names(data)) "SNP" else NA
   
   # Deduplicate data on position
-  data_dedup      <- data[!duplicated(data$position), ]
-  repr            <- data_dedup[data_dedup$position %in% blocks$rps_BP, ]
+  if (!is.null(chrom_col) && chrom_col %in% names(data)) {
+    data_dedup <- data[!duplicated(data[, c(chrom_col, "position")]), ]
+  } else {
+    data_dedup <- data[!duplicated(data$position), ]
+  }
+  # note that in the case when multiple SNPs is based in one bp, only the first
+  # instance will be kept. This is an expected update in future version.
+  if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(data_dedup)) {
+    keys_block <- paste(blocks$CHROM, blocks$rps_BP, sep = ":")
+    keys_data  <- paste(data_dedup[[chrom_col]], data_dedup$position, sep = ":")
+    repr       <- data_dedup[keys_data %in% keys_block, ]
+  } else {
+    repr <- data_dedup[data_dedup$position %in% blocks$rps_BP, ]
+  }
+  # only keep rows that have representative SNPs
   repr$rps_BP     <- repr$position
   
   # Add rps_ID if available
@@ -81,7 +99,12 @@ annotate_blocks <- function(blocks, data,
   repr      <- repr[, c(join_cols, extra), drop = FALSE]
   
   # Merge
-  out <- merge(blocks, repr, by = "rps_BP", all.x = TRUE)
+  merge_keys <- "rps_BP"
+  if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(repr)) {
+    if (chrom_col != "CHROM") names(repr)[names(repr) == chrom_col] <- "CHROM"
+    merge_keys <- c("CHROM", "rps_BP")
+  }
+  out <- merge(blocks, repr, by = merge_keys, all.x = TRUE)
   
   # Build ordered column list based on keep_* flags
   meta <- c(

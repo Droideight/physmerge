@@ -31,8 +31,8 @@ read_sumstat(
 \code{chrom_col}, \code{pos_col}, \code{id_col}, \code{value_col}.}
 }}
 
-\item{value_col}{Name of the column to use as the merging value.  Overrides
-the format default when supplied.  Common choices: \code{"P"},
+\item{value_col}{Name of the column to use as the "value" when merging.
+Overrides the format default when supplied.  Common choices: \code{"P"},
 \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.}
 
 \item{chrom_col}{Chromosome column name.  Overrides format default.}
@@ -62,7 +62,7 @@ A named list with two elements:
 \describe{
 \item{\code{data}}{The prepared data frame with all original columns plus
 \code{position} and \code{value} appended, sorted by position.
-Rows with \code{NA} in either column are dropped.}
+Rows with \code{NA} in any column are dropped. #CHROM renamed to CHR.}
 \item{\code{reward}}{Suggested reward direction for
 \code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
 test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
