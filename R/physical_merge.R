@@ -22,13 +22,13 @@
 #'
 #' \enumerate{
 #'   \item \strong{Forward scan}: opens a block when a significant SNP is
-#'     encountered and keeps it alive as long as the next SNP falls within
-#'     \code{window} bp of the previous one.  Whenever a more significant SNP
-#'     is found inside the block, it becomes the new representative and the
-#'     window resets.
+#'     encountered and keeps it alive as long as the next (more significant) 
+#'     SNP falls within \code{window} bp of the previous one.  Whenever a more
+#'     significant SNP is found inside the block, it becomes the new
+#'     representative and the "steps remaining" resets.
 #'   \item \strong{Collapse pass}: merges adjacent blocks whose representative
 #'     SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
-#'     the more significant representative.
+#'     the more significant representative. Currently unlikely to trigger.
 #'   \item \strong{Trim pass}: if after collapsing any block's \code{end}
 #'     still overlaps the next block's \code{start}, the \code{end} is trimmed
 #'     to \code{start} of the next block, guaranteeing zero overlap.
@@ -40,7 +40,7 @@
 #'
 #' @param data      A data frame with (at least) two numeric columns:
 #'   \describe{
-#'     \item{\code{position}}{Base-pair coordinate.}
+#'     \item{\code{position}}{Base-pair coordinate, resorted internally.}
 #'     \item{\code{value}}{Test statistic or p-value.}
 #'   }
 #' @param sig_th    Significance threshold (length-1 numeric).
@@ -109,12 +109,14 @@ physical_merge <- function(data, sig_th, window, reward = "min",
         blk$CHROM <- ch
         blk
       })
+      # run one SNP per valid chr
       out <- do.call(rbind, results)
       if (is.null(out) || nrow(out) == 0L) {
         return(data.frame(serial = integer(0), CHROM = character(0),
                           start = numeric(0), end = numeric(0),
                           rps_BP = numeric(0), rps_value = numeric(0)))
       }
+      # return blank df if no block
       out$serial    <- seq_len(nrow(out))
       rownames(out) <- NULL
       col_order     <- c("serial", "CHROM",
@@ -151,11 +153,14 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
   out_rps_val <- numeric(n);  block_count <- 0L
   
+  # default "pointer" status ><
   in_block       <- FALSE
   steps          <- window
   sig_this_block <- sig_th
   last_pos       <- data$position[1L]
   
+  # open block function: when a threshold SNP is reached and currently not in
+  # block, a new block is opened, start point recorded, window replenished.
   open_block <- function(pos, val) {
     block_count <<- block_count + 1L
     out_serial[block_count]  <<- block_count
@@ -168,6 +173,8 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     sig_this_block <<- val
   }
   
+  # close block: closure to the end point, usually triggered "AFTER" validating
+  # a non-significant out-of-bloc SNP.
   close_block <- function(last_inblock_pos) {
     out_end[block_count] <<- last_inblock_pos + steps  # remaining steps, not full window
     in_block             <<- FALSE
@@ -175,6 +182,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     sig_this_block       <<- sig_th
   }
   
+  # front-sliding scan logic
   for (i in seq_len(n)) {
     pos <- data$position[i]
     val <- data$value[i]
@@ -214,7 +222,11 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   )
   
   blk <- .collapse_blocks(raw_blocks, window, reward)
+  # see below at internal: collapse pass
   
+  # artificial start/end trimming when overlap
+  # does not affect representative SNP, aesthetic purpose.
+  # the trimmed tail is the declining area of the block, tiene más razón.
   if (nrow(blk) > 1L) {
     for (i in seq_len(nrow(blk) - 1L)) {
       if (blk$end[i] > blk$start[i + 1L])
@@ -227,6 +239,8 @@ physical_merge <- function(data, sig_th, window, reward = "min",
 
 
 # Internal: collapse pass
+# defensive code, ensuring rPS are at least a window apart.
+# in current implementation, this is unlikely (if not never) to happen.
 .collapse_blocks <- function(blk, w, reward) {
   if (nrow(blk) <= 1L) return(blk)
   out <- blk[1L, ]

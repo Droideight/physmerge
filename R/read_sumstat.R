@@ -14,8 +14,8 @@
 #'     \item{\code{"custom"}}{Specify all column names manually via
 #'       \code{chrom_col}, \code{pos_col}, \code{id_col}, \code{value_col}.}
 #'   }
-#' @param value_col Name of the column to use as the merging value.  Overrides
-#'   the format default when supplied.  Common choices: \code{"P"},
+#' @param value_col Name of the column to use as the "value" when merging.  
+#'   Overrides the format default when supplied.  Common choices: \code{"P"},
 #'   \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.
 #' @param chrom_col Chromosome column name.  Overrides format default.
 #' @param pos_col   Position column name.  Overrides format default.
@@ -36,7 +36,7 @@
 #' \describe{
 #'   \item{\code{data}}{The prepared data frame with all original columns plus
 #'     \code{position} and \code{value} appended, sorted by position.
-#'     Rows with \code{NA} in either column are dropped.}
+#'     Rows with \code{NA} in any column are dropped. #CHROM renamed to CHR.}
 #'   \item{\code{reward}}{Suggested reward direction for
 #'     \code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
 #'     test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
@@ -63,19 +63,23 @@
 #' }
 read_sumstat <- function(path,
                          format      = c("plink2", "gpcm", "custom"),
-                         value_col   = NULL,
+                         # default at opción 1
+                         value_col   = NULL, 
+                         # fallback to default if left null
                          chrom_col   = NULL,
                          pos_col     = NULL,
                          id_col      = NULL,
                          test_filter = NULL,
                          test_col    = "TEST",
+                         # with hard default
                          test_val    = "ADD",
                          chrom       = NULL,
                          ...) {
   
-  format <- match.arg(format)
+  format <- match.arg(format) 
+  #allows simplified "p" for plink2 in function
   
-  # ── Format-specific defaults ──────────────────────────────────────────────────
+  # ── Format-specific defaults (proofread) ──────────────────────────────────────
   defaults <- list(
     plink2 = list(chrom = "#CHROM", pos = "POS", id = "ID",
                   value = "P",     test_filter = TRUE),
@@ -101,10 +105,12 @@ read_sumstat <- function(path,
                                     data.table = FALSE, ...)),
     error = function(e) stop("Failed to read file: ", conditionMessage(e))
   )
+  # if a file without header is supplied, reading is not possible.
   
   # Normalise #CHROM → CHROM everywhere
   names(df)[names(df) == "#CHROM"] <- "CHROM"
   if (chrom_col == "#CHROM") chrom_col <- "CHROM"
+  # do pay attention all downstream files require CHROM instead of #CHROM
   
   # ── Validate columns ──────────────────────────────────────────────────────────
   needed <- c(chrom_col, pos_col, value_col)
@@ -126,6 +132,7 @@ read_sumstat <- function(path,
         stop("No rows remain after TEST filter.")
     }
   }
+  # if test filt is not found but requested, process will proceed
   
   # ── Chromosome filter ─────────────────────────────────────────────────────────
   if (!is.null(chrom)) {
@@ -136,16 +143,19 @@ read_sumstat <- function(path,
   # ── Append interface columns ──────────────────────────────────────────────────
   df$position <- suppressWarnings(as.numeric(df[[pos_col]]))
   df$value    <- suppressWarnings(as.numeric(df[[value_col]]))
+  # garner necessary two col df
   
   ok <- !is.na(df$position) & !is.na(df$value)
   if (any(!ok))
     message(sum(!ok), " row(s) dropped (NA in position or value).")
   df <- df[ok, ]
+  # drop any col with na
   
   if (nrow(df) == 0L)
     stop("No usable rows after filtering.")
   
   df <- df[order(df$position), ]
+  # ascending pos is needed for physical merge.
   
   # ── Suggest reward direction ──────────────────────────────────────────────────
   stat_cols <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
@@ -153,10 +163,12 @@ read_sumstat <- function(path,
   suggested <- if (value_col %in% stat_cols) "max" else "min"
   if (value_col == "LOG10_P")
     message("LOG10_P detected: consider reward = 'max' for physical_merge().")
+  # for the special interpretation of natural log scale
   list(
     data   = df,
     reward = suggested
   )
+  # the reason why df$data is needed in physical_merge.R
 }
 
 # Null-coalescing operator (internal)
