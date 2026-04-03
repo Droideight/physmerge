@@ -11,7 +11,7 @@
 
 <meta name="author" content="Pin" />
 
-<meta name="date" content="2026-03-28" />
+<meta name="date" content="2026-04-03" />
 
 <title>physmerge: Manual</title>
 
@@ -1571,7 +1571,7 @@ border-radius: 0px;
 
 <h1 class="title toc-ignore">physmerge: Manual</h1>
 <h4 class="author">Pin</h4>
-<h4 class="date">2026-03-28</h4>
+<h4 class="date">2026-04-03</h4>
 
 </div>
 
@@ -1651,10 +1651,18 @@ locus inspection</li>
 <p>The algorithm runs in three passes:</p>
 <ol style="list-style-type: decimal">
 <li><p><strong>Forward scan</strong> — opens a block when a significant
-SNP is encountered. The block stays alive as long as the next SNP is
-within <code>window</code> bp. Whenever a more significant SNP is found
-inside the block, it becomes the new representative and the window
-resets.</p></li>
+SNP is encountered. The block stays alive as long as the window has not
+been exhausted. The <code>reset_on</code> parameter controls when the
+window resets:</p>
+<ul>
+<li><code>&quot;best&quot;</code> (default): resets only when a <em>more</em>
+significant SNP is found inside the block. The representative SNP is
+always the local maximum.</li>
+<li><code>&quot;any&quot;</code>: resets whenever <em>any</em> significant SNP is
+found, regardless of strength. Equivalent to taking the union of
+±<code>window</code> intervals around every significant SNP
+(locusDefiner-style logic).</li>
+</ul></li>
 <li><p><strong>Collapse pass</strong> — merges adjacent blocks whose
 representative SNPs (<code>rps_BP</code>) are fewer than
 <code>window</code> bp apart, keeping the more significant
@@ -1937,6 +1945,13 @@ statistics</td>
 <td><code>NULL</code></td>
 <td>Chromosome column name; auto-detects <code>CHROM</code>; runs per
 chromosome automatically when multiple values are found</td>
+</tr>
+<tr class="even">
+<td><code>reset_on</code></td>
+<td><code>&quot;best&quot;</code></td>
+<td><code>&quot;best&quot;</code>: window resets only on a more significant SNP;
+<code>&quot;any&quot;</code>: resets on any significant SNP
+(locusDefiner-equivalent)</td>
 </tr>
 </tbody>
 </table>

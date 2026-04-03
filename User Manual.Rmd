@@ -59,9 +59,13 @@ library(physmerge)
 The algorithm runs in three passes:
 
 1. **Forward scan** — opens a block when a significant SNP is encountered.
-   The block stays alive as long as the next SNP is within `window` bp.
-   Whenever a more significant SNP is found inside the block, it becomes the
-   new representative and the window resets.
+   The block stays alive as long as the window has not been exhausted.
+   The `reset_on` parameter controls when the window resets:
+   - `"best"` (default): resets only when a *more* significant SNP is found
+     inside the block. The representative SNP is always the local maximum.
+   - `"any"`: resets whenever *any* significant SNP is found, regardless of
+     strength. Equivalent to taking the union of ±`window` intervals around
+     every significant SNP (locusDefiner-style logic).
 
 2. **Collapse pass** — merges adjacent blocks whose representative SNPs
    (`rps_BP`) are fewer than `window` bp apart, keeping the more significant
@@ -273,6 +277,7 @@ export_snp_list(recovered_plink, "snp_ids_by_chr.zip", by_chrom = TRUE)
 | `window` | — | Window size in base-pairs |
 | `reward` | `"min"` | `"min"` for p-values; `"max"` for test statistics |
 | `chrom_col` | `NULL` | Chromosome column name; auto-detects `CHROM`; runs per chromosome automatically when multiple values are found |
+| `reset_on` | `"best"` | `"best"`: window resets only on a more significant SNP; `"any"`: resets on any significant SNP (locusDefiner-equivalent) |
 
 ### `annotate_blocks()`
 

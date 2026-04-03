@@ -33,19 +33,34 @@ head(toy_df)
 
 ```{r Run_with_preprocess_DF}
 # -----------------------------------------------------------------------------
-# Physical Merge
-# This one is if you already have a dataframe that has position and value.
-# This function returns a list of "blocks" and the representative of each block.
-# Blocks may overlap, but representatives are guranteed to be away by 1+ window.
+# Physical Merge — default (reset_on = "best")
+# Window resets only when a more significant SNP is found.
 # -----------------------------------------------------------------------------
-merged_toy_df <- physical_merge(
-  toy_df,        # data frame with columns position and value
-  5e-8,          # significance threshold
-  500000,        # window size in base-pairs
-  reward = "min" # "min" for p-values; "max" for test statistics
+merged_best <- physical_merge(
+  toy_df,
+  5e-8,
+  500000,
+  reward   = "min",
+  reset_on = "best"   # default; equivalent to omitting the argument
 )
+merged_best
+
 # -----------------------------------------------------------------------------
-head(merged_toy_df)
+# Physical Merge — reset_on = "any" (locusDefiner-equivalent)
+# Window resets on every significant SNP, regardless of strength.
+# Equivalent to taking the union of ±window intervals around each sig SNP.
+# -----------------------------------------------------------------------------
+merged_any <- physical_merge(
+  toy_df,
+  5e-8,
+  500000,
+  reward   = "min",
+  reset_on = "any"
+)
+merged_any
+
+# Compare: blocks that differ between the two modes are edge cases where a
+# weak bridging SNP connects two strong signals.
 
 # -----------------------------------------------------------------------------
 # Annotate Blocks
@@ -131,3 +146,52 @@ ids_checkz <- readLines("/Users/user/Desktop/Classes/Res Prog/Housekeeping/snp_i
 cat("Total IDs:", length(ids_checkz), "\n")
 head(ids_checkz)
 ```
+
+```{r Run_with_cross_chr}
+# ── Multi-chromosome toy dataset for physmerge testing ──────────────────────────
+devtools::install_github("Droideight/physmerge", force = TRUE)
+library(physmerge)
+
+set.seed(42)
+
+make_chr <- function(chr_label, n, max_bp, peaks) {
+  pos  <- sort(sample(seq_len(max_bp), n))
+  pval <- runif(n, 0.01, 1)
+  for (pk in peaks) {
+    idx <- which.min(abs(pos - pk$center))
+    offsets <- seq(-floor(length(pk$vals)/2), floor(length(pk$vals)/2),
+                   length.out = length(pk$vals))
+    pval[idx + offsets] <- pk$vals
+  }
+  data.frame(CHROM = chr_label, position = pos, value = pval)
+}
+
+# ── Chr 1: 3 loci, one with sub-peaks close together ───────────────────────────
+chr1 <- make_chr("1", n = 500, max_bp = 5e6, peaks = list(
+  list(center = 1050000, vals = c(1e-5, 1e-6, 1e-7, 1e-10, 1e-8, 1e-6, 1e-5)),
+  list(center = 2500000, vals = c(1e-6, 1e-7, 3e-9, 1e-7, 1e-6)),
+  list(center = 4000000, vals = c(1e-6, 2e-8, 1e-6, 1e-6, 5e-9, 1e-6))
+))
+
+# ── Chr 2: 2 loci, one very sharp, one broad ───────────────────────────────────
+chr2 <- make_chr("2", n = 400, max_bp = 4e6, peaks = list(
+  list(center = 800000,  vals = c(1e-5, 1e-12, 1e-5)),
+  list(center = 3200000, vals = c(1e-5, 1e-6, 1e-7, 1e-8, 1e-7, 1e-6, 1e-5))
+))
+
+# ── Chr 3: 1 borderline locus ──────────────────────────────────────────────────
+chr3 <- make_chr("3", n = 300, max_bp = 3e6, peaks = list(
+  list(center = 1500000, vals = c(4e-8, 6e-8, 4e-8))
+))
+
+# ── Chr 4: no significant loci (null chromosome) ──────────────────────────────
+chr4 <- make_chr("4", n = 200, max_bp = 2e6, peaks = list())
+
+# ── Combine ────────────────────────────────────────────────────────────────────
+toy_multi <- do.call(rbind, list(chr1, chr2, chr3, chr4))
+rownames(toy_multi) <- NULL
+
+blocks <- physical_merge(toy_multi, sig_th = 5e-8, window = 500000, reward = "min")
+blocks
+```
+
