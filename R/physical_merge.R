@@ -22,13 +22,22 @@
 #'
 #' \enumerate{
 #'   \item \strong{Forward scan}: opens a block when a significant SNP is
-#'     encountered and keeps it alive as long as the next (more significant) 
-#'     SNP falls within \code{window} bp of the previous one.  Whenever a more
-#'     significant SNP is found inside the block, it becomes the new
-#'     representative and the "steps remaining" resets.
+#'     encountered and keeps it alive as long as the window has not been
+#'     exhausted.  The behaviour when a significant (but not necessarily more
+#'     significant) SNP is found inside the block is controlled by
+#'     \code{reset_on}:
+#'     \describe{
+#'       \item{\code{"best"} (default)}{Steps reset only when a \emph{more}
+#'         significant SNP is found.  The representative SNP is always the
+#'         local maximum.}
+#'       \item{\code{"any"}}{Steps reset whenever \emph{any} significant SNP
+#'         is found, regardless of its value.  This is equivalent to taking
+#'         the union of \eqn{\pm}\code{window} intervals around every
+#'         significant SNP (i.e. locusDefiner-style logic).}
+#'     }
 #'   \item \strong{Collapse pass}: merges adjacent blocks whose representative
 #'     SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
-#'     the more significant representative. Currently unlikely to trigger.
+#'     the more significant representative.
 #'   \item \strong{Trim pass}: if after collapsing any block's \code{end}
 #'     still overlaps the next block's \code{start}, the \code{end} is trimmed
 #'     to \code{start} of the next block, guaranteeing zero overlap.
@@ -47,6 +56,10 @@
 #' @param window    Window size in base-pairs (positive numeric).
 #' @param reward    \code{"min"} (default) for p-values; \code{"max"} for
 #'   test statistics.
+#' @param reset_on  \code{"best"} (default): steps reset only when a more
+#'   significant SNP is encountered inside the current block.
+#'   \code{"any"}: steps reset whenever any significant SNP is encountered,
+#'   equivalent to the union-of-intervals logic used by locusDefiner.
 #' @param chrom_col Name of the chromosome column in \code{data}.  If
 #'   \code{NULL} (default), the function auto-detects a column named
 #'   \code{"CHROM"}.  When a chromosome column is found and contains more
@@ -70,9 +83,14 @@
 #'   position = c(100, 200, 350, 5000, 5100, 5200, 9000),
 #'   value    = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 #' )
+#' # default: reset only on more significant SNP
 #' physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
+#'
+#' # locusDefiner-equivalent: reset on any significant SNP
+#' physical_merge(df, sig_th = 0.05, window = 500, reward = "min",
+#'                reset_on = "any")
 physical_merge <- function(data, sig_th, window, reward = "min",
-                           chrom_col = NULL) {
+                           reset_on = "best", chrom_col = NULL) {
   
   # ── Input validation ─────────────────────────────────────────────────────────
   if (!is.data.frame(data))
@@ -87,6 +105,8 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     stop("`sig_th` must be a single numeric value.")
   if (length(window) != 1L || !is.numeric(window) || window <= 0)
     stop("`window` must be a single positive numeric value.")
+  if (!reset_on %in% c("best", "any"))
+    stop("`reset_on` must be either 'best' or 'any'.")
   
   # ── Per-chromosome dispatch ───────────────────────────────────────────────────
   resolved_chrom <- if (!is.null(chrom_col)) {
@@ -104,19 +124,17 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     if (length(chroms) > 1L) {
       results <- lapply(chroms, function(ch) {
         sub <- data[data[[resolved_chrom]] == ch, ]
-        blk <- .physical_merge_single(sub, sig_th, window, reward)
+        blk <- .physical_merge_single(sub, sig_th, window, reward, reset_on)
         if (nrow(blk) == 0L) return(blk)
         blk$CHROM <- ch
         blk
       })
-      # run one SNP per valid chr
       out <- do.call(rbind, results)
       if (is.null(out) || nrow(out) == 0L) {
         return(data.frame(serial = integer(0), CHROM = character(0),
                           start = numeric(0), end = numeric(0),
                           rps_BP = numeric(0), rps_value = numeric(0)))
       }
-      # return blank df if no block
       out$serial    <- seq_len(nrow(out))
       rownames(out) <- NULL
       col_order     <- c("serial", "CHROM",
@@ -124,7 +142,6 @@ physical_merge <- function(data, sig_th, window, reward = "min",
       return(out[, col_order])
     }
   } else {
-    # No chrom info: warn if range suggests multi-chromosomal data
     pos_range <- diff(range(data$position, na.rm = TRUE))
     if (pos_range > 2.5e8)
       warning("Position range > 250 Mb detected but no chromosome column found. ",
@@ -133,12 +150,12 @@ physical_merge <- function(data, sig_th, window, reward = "min",
               "Add a CHROM column or filter to one chromosome at a time.")
   }
   
-  .physical_merge_single(data, sig_th, window, reward)
+  .physical_merge_single(data, sig_th, window, reward, reset_on)
 }
 
 
 # Internal: single-chromosome merging
-.physical_merge_single <- function(data, sig_th, window, reward) {
+.physical_merge_single <- function(data, sig_th, window, reward, reset_on) {
   
   data <- data[order(data$position), ]
   n    <- nrow(data)
@@ -153,14 +170,11 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
   out_rps_val <- numeric(n);  block_count <- 0L
   
-  # default "pointer" status ><
   in_block       <- FALSE
   steps          <- window
   sig_this_block <- sig_th
   last_pos       <- data$position[1L]
   
-  # open block function: when a threshold SNP is reached and currently not in
-  # block, a new block is opened, start point recorded, window replenished.
   open_block <- function(pos, val) {
     block_count <<- block_count + 1L
     out_serial[block_count]  <<- block_count
@@ -173,16 +187,13 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     sig_this_block <<- val
   }
   
-  # close block: closure to the end point, usually triggered "AFTER" validating
-  # a non-significant out-of-bloc SNP.
   close_block <- function(last_inblock_pos) {
-    out_end[block_count] <<- last_inblock_pos + steps  # remaining steps, not full window
+    out_end[block_count] <<- last_inblock_pos + steps
     in_block             <<- FALSE
     steps                <<- window
     sig_this_block       <<- sig_th
   }
   
-  # front-sliding scan logic
   for (i in seq_len(n)) {
     pos <- data$position[i]
     val <- data$value[i]
@@ -199,7 +210,19 @@ physical_merge <- function(data, sig_th, window, reward = "min",
         
       } else {
         steps <- remaining
-        if (.is_more_significant(val, sig_this_block, reward)) {
+        
+        if (reset_on == "any" && .is_significant(val, sig_th, reward)) {
+          # locusDefiner-style: any significant SNP resets the window.
+          # Update representative only if this SNP is also more significant.
+          steps <- window
+          if (.is_more_significant(val, sig_this_block, reward)) {
+            sig_this_block           <- val
+            out_rps_bp[block_count]  <- pos
+            out_rps_val[block_count] <- val
+          }
+          
+        } else if (.is_more_significant(val, sig_this_block, reward)) {
+          # reset_on == "best": reset only on improvement (original behaviour).
           sig_this_block           <- val
           steps                    <- window
           out_rps_bp[block_count]  <- pos
@@ -222,11 +245,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   )
   
   blk <- .collapse_blocks(raw_blocks, window, reward)
-  # see below at internal: collapse pass
   
-  # artificial start/end trimming when overlap
-  # does not affect representative SNP, aesthetic purpose.
-  # the trimmed tail is the declining area of the block, tiene más razón.
   if (nrow(blk) > 1L) {
     for (i in seq_len(nrow(blk) - 1L)) {
       if (blk$end[i] > blk$start[i + 1L])
@@ -239,8 +258,6 @@ physical_merge <- function(data, sig_th, window, reward = "min",
 
 
 # Internal: collapse pass
-# defensive code, ensuring rPS are at least a window apart.
-# in current implementation, this is unlikely (if not never) to happen.
 .collapse_blocks <- function(blk, w, reward) {
   if (nrow(blk) <= 1L) return(blk)
   out <- blk[1L, ]
