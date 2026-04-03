@@ -6,29 +6,31 @@ output: html_document
 ---
 
 ```{r Library_and_Toy_dataset}
-devtools::install_github("Droideight/physmerge", force = TRUE)
-library(physmerge)
-
+#devtools::install_github("Droideight/physmerge", force = TRUE)
 set.seed(42)
 n <- 500
 pos <- sort(sample(1:5e6, n))
 pval <- runif(n, 0.01, 1)
 
-# Locus 1
+# Locus 1: clean single peak
 peak1 <- which.min(abs(pos - 1050000))
 pval[peak1 + c(-3,-2,-1,0,1,2,3)] <- c(1e-5, 1e-6, 1e-7, 1e-10, 1e-8, 1e-6, 1e-5)
 
-# Locus 2
+# Locus 2: clean single peak
 peak2 <- which.min(abs(pos - 2500000))
 pval[peak2 + c(-2,-1,0,1,2)] <- c(1e-6, 1e-7, 3e-9, 1e-7, 1e-6)
 
-# Locus 3 (multiple locus being close)
+# Locus 3: two strong peaks bridged by a weak significant SNP
+#   best → two blocks (bridge does not reset steps, window exhausts between peaks)
+#   any  → one block  (bridge resets steps, extending into the second peak)
 peak3 <- which.min(abs(pos - 4000000))
-pval[peak3 + c(-1,0,1)]   <- c(1e-6, 2e-8, 1e-6)
-pval[peak3 + c(3,4,5)]    <- c(1e-6, 5e-9, 1e-6)
+pval[peak3 + c(-1, 0, 1)] <- c(1e-6, 1e-9, 1e-6)   # strong peak A
+bridge <- which.min(abs(pos - 4350000))
+pval[bridge]               <- 3e-8                    # weak bridge SNP (~350kb from A)
+peak4 <- which.min(abs(pos - 4700000))
+pval[peak4 + c(-1, 0, 1)] <- c(1e-6, 2e-9, 1e-6)   # strong peak B (~700kb from A)
 
 toy_df <- data.frame(position = pos, value = pval)
-head(toy_df)
 ```
 
 ```{r Run_with_preprocess_DF}
