@@ -1,15 +1,39 @@
 # physmerge
 
-Collapse nearby significant GWAS signals into non-overlapping locus blocks with a
-forward sliding window. No LD reference panel is needed; proximity is decided by
-base-pair distance alone, so the result does not depend on how well a reference
-panel matches the study population.
+Linkage disequilibrium (LD) within a GWAS study can produce spurious hits; this is
+commonly addressed using an LD reference panel to perform clumping. In situations
+where only summary statistics are available, however, distance-based locus
+definition is the panel-free alternative but is typically applied as ad-hoc
+per-study code.
 
-This repository holds two implementations. The **R package** is for interactive
-work; the **C executable** in `cli/` runs the same merge from the command line on
-full-size files, with no R installed. They return the same blocks. The C tool
-reads the file in one streaming pass, so its memory use stays at about 2.4 MB
-(1.85 GB input, 2.4 MB resident).
+physmerge collapses significant SNPs into non-overlapping locus blocks from
+summary statistics alone using a forward sliding-window rule (a key parameter
+`reset_on = "any"`: an open block is extended whenever the next significant SNP
+lies within the window of the current one), yielding contiguous, strictly
+non-overlapping locus blocks directly from summary statistics. This program is
+available both as an R package and an executable, in this repository. The two
+return the same blocks; the executable reads the file in one streaming pass, so
+its memory use stays at about 2.4 MB (1.85 GB input, 2.4 MB resident).
+
+## How it works
+
+`physical_merge()` makes a single forward pass over position-sorted summary
+statistics. A block opens at the first significant SNP, with its start placed one
+window upstream (`max(0, position - window)`). The block carries a window-sized
+budget that is spent by the distance traveled and refilled to the full window at
+every significant SNP (`reset_on = "any"`); it stays open until the budget runs
+out, equivalently, until the next significant SNP lies one window or more beyond
+the previous one, at which point it closes one window downstream of the last
+significant SNP, mirroring its start. A new block opens upon the next significant
+SNP until the last position is visited.
+
+The representative of each block is its most significant SNP. By construction the
+representatives of successive blocks are at least one window apart, but because
+each block is padded by one window on both sides, adjacent blocks still overlap
+whenever that gap is less than two windows; a final trim step therefore shortens
+any block whose downstream-extended end runs past the next block's
+upstream-extended start, giving contiguous, strictly non-overlapping blocks. With
+a chromosome column the algorithm runs per chromosome.
 
 ---
 
@@ -22,8 +46,8 @@ install.packages("devtools")           # if you do not have it
 devtools::install_github("Droideight/physmerge")
 ```
 
-Depends only on base R and `utils`. `data.table` is optional and makes
-`read_sumstat()` much faster.
+The R package depends only on base R and `utils` (`data.table` optional for fast
+reading).
 
 ### C executable, macOS
 
@@ -138,6 +162,12 @@ physmerge --input gwas.glm.linear --format plink2 --quiet | head
 
 ### Output columns
 
+`physical_merge()` returns one row per block (serial, chromosome, start, end,
+representative position and value); `annotate_blocks()` joins original fields back
+to each representative, and `export_snp_list()` writes representative SNP IDs as a
+flat file or per-chromosome ZIP. The executable does all four steps in one call.
+
+
 | Column | Meaning |
 |---|---|
 | `serial` | block number, running across chromosomes |
@@ -214,9 +244,10 @@ a chr22 HbA1c scan (1.25 million SNPs, 2,550 of them genome-wide significant),
 Other flags: `--sep` to force a separator, `--sort` for input that is not
 position-sorted, `--no-header`, `--quiet`, `--help`.
 
-`--reset-on` controls how a block stays open. `best` refills the window only when
-a more significant SNP appears; `any` refills it at every significant SNP, which
-is the union of the ±window intervals around all significant SNPs.
+`--reset-on` controls how a block stays open. `any` extends an open block whenever
+the next significant SNP lies within the window of the current one, which is the
+union of the ±window intervals around all significant SNPs; `best` refills the
+window only when a more significant SNP appears.
 
 Input may be plain text, gzip (`.gz`), or `-` for stdin. A file that is not
 position-sorted within a chromosome is rejected with a message instead of being
