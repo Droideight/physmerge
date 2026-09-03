@@ -3,6 +3,10 @@
 A single-file C99 port of the physmerge R package, for running physical locus
 merging on full-size summary statistics without loading them into R.
 
+**For installation and everyday usage, see the [top-level README](../README.md).**
+This file covers build details, the memory model, and how the executable differs
+from the R package.
+
 ## Build
 
 The source is one portable C99 file. It needs a C compiler and, only if you
