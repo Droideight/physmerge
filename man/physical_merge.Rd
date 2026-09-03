@@ -4,7 +4,14 @@
 \alias{physical_merge}
 \title{Physical locus merging}
 \usage{
-physical_merge(data, sig_th, window, reward = "min", chrom_col = NULL)
+physical_merge(
+  data,
+  sig_th,
+  window,
+  reward = "min",
+  reset_on = "best",
+  chrom_col = NULL
+)
 }
 \arguments{
 \item{data}{A data frame with (at least) two numeric columns:
@@ -19,6 +26,11 @@ physical_merge(data, sig_th, window, reward = "min", chrom_col = NULL)
 
 \item{reward}{\code{"min"} (default) for p-values; \code{"max"} for
 test statistics.}
+
+\item{reset_on}{\code{"best"} (default): steps reset only when a more
+significant SNP is encountered inside the current block.
+\code{"any"}: steps reset whenever any significant SNP is encountered,
+equivalent to the union-of-intervals logic used by locusDefiner.}
 
 \item{chrom_col}{Name of the chromosome column in \code{data}.  If
 \code{NULL} (default), the function auto-detects a column named
@@ -36,6 +48,13 @@ detected).}
 \item{\code{rps_BP}}{Position of the most significant representative SNP.}
 \item{\code{rps_value}}{Value of the representative SNP.}
 }
+
+The returned data frame additionally carries an attribute
+\code{"rps_row"}: the row index in \code{data} of each representative SNP.
+\code{\link{annotate_blocks}} uses it to recover the exact input row, which
+is the only reliable way to label a block when several variants share one
+base-pair position (multi-allelic sites).  The attribute is not a column and
+does not change the visible output.
 }
 \description{
 Scans a position-sorted genomic data frame and collapses nearby significant
@@ -47,13 +66,22 @@ The algorithm works in three passes:
 
 \enumerate{
 \item \strong{Forward scan}: opens a block when a significant SNP is
-encountered and keeps it alive as long as the next (more significant)
-SNP falls within \code{window} bp of the previous one.  Whenever a more
-significant SNP is found inside the block, it becomes the new
-representative and the "steps remaining" resets.
+encountered and keeps it alive as long as the window has not been
+exhausted.  The behaviour when a significant (but not necessarily more
+significant) SNP is found inside the block is controlled by
+\code{reset_on}:
+\describe{
+\item{\code{"best"} (default)}{Steps reset only when a \emph{more}
+significant SNP is found.  The representative SNP is always the
+local maximum.}
+\item{\code{"any"}}{Steps reset whenever \emph{any} significant SNP
+is found, regardless of its value.  This is equivalent to taking
+the union of \eqn{\pm}\code{window} intervals around every
+significant SNP (i.e. locusDefiner-style logic).}
+}
 \item \strong{Collapse pass}: merges adjacent blocks whose representative
 SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
-the more significant representative. Currently unlikely to trigger.
+the more significant representative.
 \item \strong{Trim pass}: if after collapsing any block's \code{end}
 still overlaps the next block's \code{start}, the \code{end} is trimmed
 to \code{start} of the next block, guaranteeing zero overlap.
@@ -68,5 +96,10 @@ df <- data.frame(
   position = c(100, 200, 350, 5000, 5100, 5200, 9000),
   value    = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 )
+# default: reset only on more significant SNP
 physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
+
+# locusDefiner-equivalent: reset on any significant SNP
+physical_merge(df, sig_th = 0.05, window = 500, reward = "min",
+               reset_on = "any")
 }

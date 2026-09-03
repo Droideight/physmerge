@@ -49,9 +49,13 @@ each representative SNP row, with block metadata columns selectively
 retained based on \code{keep_*} arguments.
 }
 \description{
-Joins the original input data back to the merged block table on \code{CHROM},
-\code{rps_BP}, returning one row per block containing all original columns
-for the representative SNP.  Block metadata columns (\code{serial},
+Returns one row per block containing all original columns for the
+representative SNP.  When \code{blocks} still carries the \code{"rps_row"}
+attribute set by \code{\link{physical_merge}}, the representative row is
+taken directly by index, so blocks at multi-allelic sites are labelled with
+the variant that actually led the block.  Otherwise the function falls back
+to joining on \code{CHROM} and \code{rps_BP}, which can only keep the first
+row at a duplicated position.  Block metadata columns (\code{serial},
 \code{start}, \code{end}, \code{rps_BP}, \code{rps_value}) can be
 individually included or dropped.
 }

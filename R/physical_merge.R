@@ -76,6 +76,13 @@
 #'   \item{\code{rps_value}}{Value of the representative SNP.}
 #' }
 #'
+#' The returned data frame additionally carries an attribute
+#' \code{"rps_row"}: the row index in \code{data} of each representative SNP.
+#' \code{\link{annotate_blocks}} uses it to recover the exact input row, which
+#' is the only reliable way to label a block when several variants share one
+#' base-pair position (multi-allelic sites).  The attribute is not a column and
+#' does not change the visible output.
+#'
 #' @export
 #'
 #' @examples
@@ -123,23 +130,26 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     chroms <- unique(data[[resolved_chrom]])
     if (length(chroms) > 1L) {
       results <- lapply(chroms, function(ch) {
-        sub <- data[data[[resolved_chrom]] == ch, ]
+        sel <- which(data[[resolved_chrom]] == ch)
+        sub <- data[sel, ]
         blk <- .physical_merge_single(sub, sig_th, window, reward, reset_on)
         if (nrow(blk) == 0L) return(blk)
-        blk$CHROM <- ch
+        blk$rps_row <- sel[blk$rps_row]   # subset index -> row of `data`
+        blk$CHROM   <- ch
         blk
       })
       out <- do.call(rbind, results)
       if (is.null(out) || nrow(out) == 0L) {
-        return(data.frame(serial = integer(0), CHROM = character(0),
-                          start = numeric(0), end = numeric(0),
-                          rps_BP = numeric(0), rps_value = numeric(0)))
+        return(.stash_rps_row(data.frame(serial = integer(0), CHROM = character(0),
+                                         start = numeric(0), end = numeric(0),
+                                         rps_BP = numeric(0), rps_value = numeric(0),
+                                         rps_row = integer(0))))
       }
       out$serial    <- seq_len(nrow(out))
       rownames(out) <- NULL
       col_order     <- c("serial", "CHROM",
                          setdiff(names(out), c("serial", "CHROM")))
-      return(out[, col_order])
+      return(.stash_rps_row(out[, col_order]))
     }
   } else {
     pos_range <- diff(range(data$position, na.rm = TRUE))
@@ -150,38 +160,53 @@ physical_merge <- function(data, sig_th, window, reward = "min",
               "Add a CHROM column or filter to one chromosome at a time.")
   }
   
-  .physical_merge_single(data, sig_th, window, reward, reset_on)
+  .stash_rps_row(.physical_merge_single(data, sig_th, window, reward, reset_on))
+}
+
+
+# Internal: move the representative-SNP row index off the visible data frame
+# and onto an attribute, so the public column set is unchanged.  annotate_blocks()
+# uses it to pick the exact input row that became the representative, which
+# matters when several variants share one base-pair position.
+.stash_rps_row <- function(blk) {
+  rr <- blk$rps_row
+  blk$rps_row <- NULL
+  attr(blk, "rps_row") <- if (is.null(rr)) integer(0) else as.integer(rr)
+  blk
 }
 
 
 # Internal: single-chromosome merging
 .physical_merge_single <- function(data, sig_th, window, reward, reset_on) {
   
-  data <- data[order(data$position), ]
+  ord  <- order(data$position)
+  data <- data[ord, ]
   n    <- nrow(data)
   
   empty_out <- data.frame(
     serial    = integer(0), start = numeric(0), end   = numeric(0),
-    rps_BP    = numeric(0), rps_value = numeric(0)
+    rps_BP    = numeric(0), rps_value = numeric(0), rps_row = integer(0)
   )
   if (n == 0L) return(empty_out)
   
   out_serial  <- integer(n);  out_start   <- numeric(n)
   out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
-  out_rps_val <- numeric(n);  block_count <- 0L
+  out_rps_val <- numeric(n);  out_rps_row <- integer(n)
+  block_count <- 0L
   
   in_block       <- FALSE
   steps          <- window
   sig_this_block <- sig_th
   last_pos       <- data$position[1L]
   
-  open_block <- function(pos, val) {
+  open_block <- function(pos, val, i) {
     block_count <<- block_count + 1L
     out_serial[block_count]  <<- block_count
     out_start[block_count]   <<- max(0, pos - window)
     out_end[block_count]     <<- NA_real_
     out_rps_bp[block_count]  <<- pos
     out_rps_val[block_count] <<- val
+    out_rps_row[block_count] <<- ord[i]
     in_block       <<- TRUE
     steps          <<- window
     sig_this_block <<- val
@@ -199,14 +224,14 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     val <- data$value[i]
     
     if (!in_block) {
-      if (.is_significant(val, sig_th, reward)) open_block(pos, val)
+      if (.is_significant(val, sig_th, reward)) open_block(pos, val, i)
       
     } else {
       remaining <- steps - (pos - last_pos)
       
       if (remaining <= 0) {
         close_block(last_pos)
-        if (.is_significant(val, sig_th, reward)) open_block(pos, val)
+        if (.is_significant(val, sig_th, reward)) open_block(pos, val, i)
         
       } else {
         steps <- remaining
@@ -219,6 +244,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
             sig_this_block           <- val
             out_rps_bp[block_count]  <- pos
             out_rps_val[block_count] <- val
+            out_rps_row[block_count] <- ord[i]
           }
           
         } else if (.is_more_significant(val, sig_this_block, reward)) {
@@ -227,6 +253,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
           steps                    <- window
           out_rps_bp[block_count]  <- pos
           out_rps_val[block_count] <- val
+          out_rps_row[block_count] <- ord[i]
         }
       }
     }
@@ -241,6 +268,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     end       = out_end[seq_len(block_count)],
     rps_BP    = out_rps_bp[seq_len(block_count)],
     rps_value = out_rps_val[seq_len(block_count)],
+    rps_row   = out_rps_row[seq_len(block_count)],
     stringsAsFactors = FALSE
   )
   
@@ -269,6 +297,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
       if (.is_more_significant(cur$rps_value, out$rps_value[last], reward)) {
         out$rps_BP[last]    <- cur$rps_BP
         out$rps_value[last] <- cur$rps_value
+        out$rps_row[last]   <- cur$rps_row
       }
     } else {
       out <- rbind(out, cur)
