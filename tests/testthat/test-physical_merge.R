@@ -50,3 +50,26 @@ test_that("invalid inputs throw errors", {
                               reward = "wrong"))
   expect_error(physical_merge(df, sig_th = 0.05, window = -1))
 })
+
+test_that("representative SNP is correct when two variants share one position", {
+  d <- data.frame(
+    CHROM    = c(1, 1, 1),
+    position = c(100, 100, 700),
+    ID       = c("multiallelic_ref", "true_lead", "other"),
+    value    = c(0.9, 1e-9, 1e-9)
+  )
+  b <- physical_merge(d, sig_th = 5e-8, window = 500, chrom_col = "CHROM")
+  expect_equal(attr(b, "rps_row"), c(2L, 3L))
+  a <- annotate_blocks(b, d)
+  expect_equal(a$rps_ID[1], "true_lead")
+})
+
+test_that("annotate_blocks still works on blocks with no rps_row attribute", {
+  d <- data.frame(CHROM = 1, position = c(100, 700),
+                  ID = c("a", "b"), value = c(1e-9, 1e-9))
+  b <- physical_merge(d, sig_th = 5e-8, window = 500, chrom_col = "CHROM")
+  attr(b, "rps_row") <- NULL
+  a <- annotate_blocks(b, d)
+  expect_equal(nrow(a), 2L)
+  expect_equal(a$rps_ID, c("a", "b"))
+})
