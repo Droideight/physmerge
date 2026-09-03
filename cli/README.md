@@ -1,4 +1,4 @@
-# physmerge — C command-line executable
+# physmerge C command-line executable
 
 A single-file C99 port of the physmerge R package, for running physical locus
 merging on full-size summary statistics without loading them into R.
@@ -87,7 +87,7 @@ exactly as R's `order()` would, at the cost of ~32 bytes per SNP.
 
 ## Fidelity to the R implementation
 
-`validate_vs_R.R` runs 212 randomised comparisons against
+`validate_vs_R.R` runs 212 randomized comparisons against
 `physmerge::physical_merge()` (all combinations of `reward`, `reset_on`,
 window size, single/multi chromosome, duplicate positions, sorted and shuffled
 input) and requires bit-identical `start`, `end`, `rps_BP` and `rps_value`.
