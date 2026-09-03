@@ -1,17 +1,15 @@
 # physmerge
 
-Collapse nearby significant GWAS signals into non-overlapping locus blocks using
-a forward sliding window. **No LD reference panel required** — proximity is
-decided by base-pair distance alone, so the result does not depend on how well a
-reference panel matches your study population.
+Collapse nearby significant GWAS signals into non-overlapping locus blocks with a
+forward sliding window. No LD reference panel is needed; proximity is decided by
+base-pair distance alone, so the result does not depend on how well a reference
+panel matches the study population.
 
-Two interchangeable implementations, both in this repository:
-
-- an **R package** for interactive work, and
-- a **C command-line executable** (`cli/`) for full-size files, with no R needed.
-
-They produce the same blocks. The C tool streams the file in one pass, so its
-memory use is a constant ~2.4 MB whether the input is 70 MB or 2 GB.
+This repository holds two implementations. The **R package** is for interactive
+work; the **C executable** in `cli/` runs the same merge from the command line on
+full-size files, with no R installed. They return the same blocks. The C tool
+reads the file in one streaming pass, so its memory use stays at about 2.4 MB
+(1.85 GB input, 2.4 MB resident).
 
 ---
 
@@ -27,7 +25,7 @@ devtools::install_github("Droideight/physmerge")
 Depends only on base R and `utils`. `data.table` is optional and makes
 `read_sumstat()` much faster.
 
-### C executable — macOS
+### C executable, macOS
 
 ```bash
 git clone https://github.com/Droideight/physmerge.git
@@ -36,14 +34,14 @@ make
 make install PREFIX=~/.local
 ```
 
-You need the Xcode command line tools (`xcode-select --install`). If
-`physmerge` is not found afterwards, put `~/.local/bin` on your PATH:
+This needs the Xcode command line tools (`xcode-select --install`). If the shell
+cannot find `physmerge` afterwards, put `~/.local/bin` on the PATH:
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-### C executable — Linux
+### C executable, Linux
 
 Same as macOS. On Debian/Ubuntu install the toolchain first:
 
@@ -51,7 +49,7 @@ Same as macOS. On Debian/Ubuntu install the toolchain first:
 sudo apt install build-essential zlib1g-dev
 ```
 
-### C executable — Windows
+### C executable, Windows
 
 ```
 git clone https://github.com/Droideight/physmerge.git
@@ -59,10 +57,10 @@ cd physmerge\cli
 build.bat
 ```
 
-`build.bat` uses MSVC (`cl`) if you are in an *x64 Native Tools Command Prompt
-for VS*, otherwise MinGW-w64 `gcc`. It produces `physmerge.exe`. The Windows
-build has no zlib, so `.gz` input must be decompressed first; plain text (what
-PLINK2 writes) is unaffected. Under WSL or Git Bash, follow the Linux
+`build.bat` uses MSVC (`cl`) inside an *x64 Native Tools Command Prompt for VS*,
+and MinGW-w64 `gcc` otherwise. Either produces `physmerge.exe`. The Windows build
+carries no zlib, so `.gz` input has to be decompressed first; plain text, which is
+what PLINK2 writes, is unaffected. Under WSL or Git Bash, follow the Linux
 instructions instead.
 
 Check it works:
@@ -75,8 +73,8 @@ physmerge --version
 
 ## 2. Quick start
 
-There is a small example file in the repository so you can try everything
-without your own data:
+The repository ships a small example file, so the commands below run without any
+data of your own:
 
 ```bash
 cd cli/example
@@ -111,8 +109,8 @@ export_snp_list(b, "lead_snps.txt")
 ## 3. Where the output goes
 
 **By default the block table is printed to the terminal (stdout)** and nothing is
-written to disk. Progress messages go to stderr, so they do not contaminate a
-redirect.
+written to disk. Progress messages go to stderr, so a redirect or a pipe carries
+the table only.
 
 To write files, name them yourself:
 
@@ -122,8 +120,8 @@ To write files, name them yourself:
 | `--snp-list FILE` | one representative SNP id per line |
 | `--snp-list-dir DIR` | `snp_ch1.txt`, `snp_ch2.txt`, … one per chromosome |
 
-The files land exactly where you point them, so give a full path if you do not
-want them in the current directory:
+The files are written where the flag points, so give a full path to keep them out
+of the current directory:
 
 ```bash
 mkdir -p ~/physmerge_out
@@ -150,14 +148,14 @@ physmerge --input gwas.glm.linear --format plink2 --quiet | head
 | `rps_ID` | its id, when the input has an id column |
 | `rps_<VALUE>` | its p-value or statistic, named after the input column |
 
-Blocks are strictly non-overlapping: `end[i] <= start[i+1]` within a chromosome.
+Blocks do not overlap; within a chromosome, `end[i] <= start[i+1]`.
 
 ---
 
 ## 4. Recipes
 
 **Standard PLINK2 `.glm.*` output.** The `plink2` format keeps only `TEST=ADD`
-rows and drops rows with a missing p-value, so you do not need to pre-filter:
+rows and drops rows with a missing p-value, so no pre-filtering is needed:
 
 ```bash
 physmerge --input gwas.glm.linear --format plink2 \
@@ -167,7 +165,7 @@ physmerge --input gwas.glm.linear --format plink2 \
 
 **The value column is `-log10(P)` rather than `P`** (PLINK2 writes
 `NEG_LOG10_P` for some runs). Point at the column, flip the direction, and
-convert the threshold — `-log10(5e-8) = 7.30103`:
+convert the threshold (`-log10(5e-8) = 7.30103`):
 
 ```bash
 physmerge --input gwas.glm.logistic.hybrid --format plink2 \
@@ -175,8 +173,8 @@ physmerge --input gwas.glm.logistic.hybrid --format plink2 \
   --out blocks.tsv
 ```
 
-**Any other table** (space-, tab- or comma-separated; the separator is detected
-from the header). Name the columns yourself:
+**Any other table**, space-, tab- or comma-separated; the separator is read from
+the header. Name the columns:
 
 ```bash
 physmerge --input sumstats.txt --format custom \
@@ -190,11 +188,11 @@ physmerge --input sumstats.txt --format custom \
 plink2 --pfile your_data --extract lead_snps.txt --make-pgen --out lead_only
 ```
 
-**Choosing a window.** A larger window merges more. On a chromosome with dense
-signal, `--window 500000 --reset-on any` can chain the whole region into one
-block; that is the algorithm working, not a failure. If you want finer loci,
-shrink the window. On a real chr22 HbA1c scan (1.25 M SNPs, 2 550 of them
-genome-wide significant), 500 kb gave 1 block and 25 kb gave 542.
+**Choosing a window.** A larger window merges more. Where significant SNPs are
+dense and never more than one window apart, `--window 500000 --reset-on any`
+chains the whole region into a single block; shrink the window for finer loci. In
+a chr22 HbA1c scan (1.25 million SNPs, 2,550 of them genome-wide significant),
+500 kb returned 1 block; in comparison, 25 kb returned 542.
 
 ---
 
@@ -216,22 +214,21 @@ genome-wide significant), 500 kb gave 1 block and 25 kb gave 542.
 Other flags: `--sep` to force a separator, `--sort` for input that is not
 position-sorted, `--no-header`, `--quiet`, `--help`.
 
-`--reset-on` is the one choice worth understanding. `best` keeps a block alive
-only while more significant SNPs keep appearing; `any` keeps it alive on any
-significant SNP, which is the union of ±window intervals around every
-significant SNP.
+`--reset-on` controls how a block stays open. `best` refills the window only when
+a more significant SNP appears; `any` refills it at every significant SNP, which
+is the union of the ±window intervals around all significant SNPs.
 
-Input may be plain text, gzip (`.gz`), or `-` for stdin. Files that are not
-position-sorted within a chromosome are rejected with a message rather than
-silently mis-merged; add `--sort` in that case.
+Input may be plain text, gzip (`.gz`), or `-` for stdin. A file that is not
+position-sorted within a chromosome is rejected with a message instead of being
+merged wrongly; add `--sort` in that case.
 
 ---
 
 ## 6. More
 
-- `cli/README.md` — build details, memory model, differences from the R package
-- `cli/PERFORMANCE.md` — benchmarks and the validation suites
-- `TECHNICAL_SPEC.md` — algorithm, data contract, edge cases (in Chinese)
-- `physmerge --help` — every flag
+- `cli/README.md`: build details, memory model, differences from the R package
+- `cli/PERFORMANCE.md`: benchmarks and the validation suites
+- `TECHNICAL_SPEC.md`: algorithm, data contract, edge cases (in Chinese)
+- `physmerge --help`: every flag
 
 MIT licensed.

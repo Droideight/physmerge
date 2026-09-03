@@ -440,7 +440,7 @@ int main(int argc, char **argv) {
     if (test_filter < 0) test_filter = dflt_test_filter;
     if (id_col && !strcmp(id_col, "NA")) id_col = NULL;
     if (no_chrom) chrom_col = NULL;
-    /* read_sumstat normalises #CHROM -> CHROM */
+    /* read_sumstat normalizes #CHROM -> CHROM */
     if (chrom_col && !strcmp(chrom_col, "#CHROM")) chrom_col = "CHROM";
 
     Reader rd; rd_open(&rd, in_path);
@@ -460,7 +460,7 @@ int main(int argc, char **argv) {
     int i_chrom = -1, i_pos = -1, i_id = -1, i_val = -1, i_test = -1;
     for (int k = 0; k < nf; k++) {
         const char *h = hf[k]; if (!h) continue;
-        if (!strcmp(h, "#CHROM")) h = "CHROM";                 /* same normalisation */
+        if (!strcmp(h, "#CHROM")) h = "CHROM";                 /* same normalization */
         if (chrom_col && i_chrom < 0 && !strcmp(h, chrom_col)) i_chrom = k;
         if (pos_col   && i_pos   < 0 && !strcmp(h, pos_col))   i_pos   = k;
         if (id_col    && i_id    < 0 && !strcmp(h, id_col))    i_id    = k;

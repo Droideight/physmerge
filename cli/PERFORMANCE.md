@@ -1,4 +1,4 @@
-# physmerge C executable — performance and validation report
+# physmerge C executable: performance and validation report
 
 Machine: Apple M4 Pro, 24 GB RAM, macOS 26.6.2, Apple clang 17 (`-O2`),
 R 4.5.3 with data.table. Timings are the median of three runs; memory is
@@ -22,7 +22,7 @@ cases; it is bound by line parsing, not by the merge itself.
 Two observations explain the shape of the table:
 
 - **R memory grows linearly with the file; C memory does not.** The R pipeline
-  materialises the whole table plus the `position`/`value` copies appended by
+  materializes the whole table plus the `position`/`value` copies appended by
   `read_sumstat()`, so 10 M SNPs cost 7.3 GB. The C tool holds one line and one
   pending block, so its footprint is 2.4 MB (dominated by the 1 MB read buffer)
   whether the input is 74 MB or 1.85 GB.
@@ -37,11 +37,11 @@ Two observations explain the shape of the table:
 
 | Suite | Cases | Result |
 |---|---:|---|
-| `validate_vs_R.R` — randomised inputs against `physical_merge()` | 212 | 212 match |
-| `validate_pipeline_R.R` — full `read_sumstat`→`export_snp_list` chain | 7 | 7 match |
+| `validate_vs_R.R`, randomized inputs against `physical_merge()` | 212 | 212 match |
+| `validate_pipeline_R.R`, full `read_sumstat` to `export_snp_list` chain | 7 | 7 match |
 | real chr22 HbA1c file, window 25 kb, `reset_on="best"` | 542 blocks | 542/542 identical, including `rps_ID` |
 
-The randomised suite covers every combination of `reward` ∈ {min, max},
+The randomized suite covers every combination of `reward` ∈ {min, max},
 `reset_on` ∈ {best, any}, window ∈ {1 kb, 50 kb, 500 kb}, one and four
 chromosomes, n ∈ {1, 5, 200, 5 000}, duplicated positions, and both sorted and
 shuffled input (the latter through `--sort`). `start`, `end` and `rps_BP` are
@@ -58,13 +58,13 @@ match is bit-exact rather than approximate.
 2. **`CHROM` column.** R omits it when the input holds a single chromosome; the
    C tool always emits it when a chromosome column is present, so the output
    schema does not depend on the data.
-3. **Lead SNP at multi-allelic sites — found by this port, since fixed in R.**
+3. **Lead SNP at multi-allelic sites, found by this port and since fixed in R.**
    On the real chr22 file 2 of 542 blocks originally got a different `rps_ID`.
    Both are positions carrying two variants: 22:21092217 holds
    `22:21092217_CT_C` (P = 0.79) and `rs546487622` (P = 1.5 × 10⁻²⁵), and
    22:30939062 holds `rs142544112` (P = 0.15) and `rs545363690`
    (P = 2.3 × 10⁻⁹). `annotate_blocks()` deduplicated the input on position and
-   kept the first row, so it labelled the block with the non-significant
+   kept the first row, so it labeled the block with the non-significant
    variant. `physical_merge()` now records the input row index of every
    representative SNP in `attr(blocks, "rps_row")` and `annotate_blocks()` uses
    it, so R and C agree on all 542 blocks including `rps_ID`. Blocks that do
