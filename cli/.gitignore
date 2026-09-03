@@ -1,0 +1,6 @@
+physmerge
+*.o
+bench/*.tsv
+bench/*.txt
+example/blocks.tsv
+example/lead_snps.txt
