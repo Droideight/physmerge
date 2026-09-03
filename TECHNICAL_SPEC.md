@@ -32,11 +32,15 @@
 | `annotate_blocks()` | [R/export.R](R/export.R) | 把原始欄位接回 blocks |
 | `export_snp_list()` | [R/export.R](R/export.R) | 輸出代表性 SNP 清單 (`.txt` 或 per-chrom `.zip`) |
 
+另有一支獨立的 C99 執行檔 [cli/physmerge.c](cli/physmerge.c)，把上述四個函式合成單一指令，不需要 R。串流單次掃描，記憶體固定 2.4 MB。每個 R 參數都有對應 flag，對照表與已知差異見 [cli/README.md](cli/README.md)、效能與驗證見 [cli/PERFORMANCE.md](cli/PERFORMANCE.md)。
+
 內部 helpers (非 exported)：
 - `.is_significant(val, sig_th, reward)` — 顯著性比較
 - `.is_more_significant(val, best, reward)` — 「更顯著」比較
 - `.physical_merge_single(...)` — 單染色體核心掃描
 - `.collapse_blocks(blk, w, reward)` — 鄰近 blocks 合併
+- `.stash_rps_row(blk)` — 把代表 SNP 的輸入列號搬到 attribute
+- `.finish_annotation(...)` — `annotate_blocks()` 兩條路徑共用的欄位排序
 - `` `%||%` `` — null-coalescing operator
 
 ---
@@ -62,6 +66,8 @@
 | `end` | numeric | block 結束 bp，= 最後 in-block SNP 位置 + 剩餘 `steps` |
 | `rps_BP` | numeric | Representative SNP 位置 (最顯著 SNP 的 bp) |
 | `rps_value` | numeric | Representative SNP 的 `value` |
+
+此外攜帶一個 **attribute** `attr(blocks, "rps_row")`：每個 block 的代表 SNP 在輸入 `data` 中的**列號** (integer vector，長度等於 `nrow(blocks)`)。它不是欄位，不影響輸出長相；`annotate_blocks()` 用它精準取回代表列，解決同 bp 多 SNP 的標註問題 (見 6.2)。若使用者對 blocks 做了列的增刪，長度或位置檢核會失敗，`annotate_blocks()` 自動退回舊的座標比對。
 
 不變式 (invariants)：
 - `start[i] ≤ rps_BP[i] ≤ end[i]`
@@ -253,11 +259,11 @@ list(
 2. **染色體欄解析**：使用者 `chrom_col` → `"CHROM"` → `"#CHROM"` → `NULL`
    (容忍未經 `read_sumstat()` 處理、保留 `#CHROM` 的輸入)
 3. **ID 欄解析**：使用者 `id_col` → `"ID"` → `"SNP"` → `NA`
-4. **去重**：
-   - 有 chrom：`!duplicated(data[, c(chrom_col, "position")])`
-   - 無 chrom：`!duplicated(data$position)`
-   - **已知限制**：同 bp 多 SNP 只保留首次 (待後續版本支援)
-5. **代表列過濾**：以 `paste(CHROM, rps_BP, sep=":")` 組複合鍵 (有 chrom 時) 或 `position %in% rps_BP` (無 chrom 時) 取出代表 SNP 列
+4. **主路徑 — 直接用列號**：若 `attr(blocks, "rps_row")` 存在、長度符合、且 `data$position[rps_row]` 與 `blocks$rps_BP` 完全相符，就以 `data[rps_row, ]` 取出代表列，用 `cbind` 接上 blocks。這是唯一能在同 bp 多 SNP (multi-allelic) 時標對 lead SNP 的方式。
+5. **回退路徑 — 座標比對** (blocks 非本版 `physical_merge()` 產生時)：
+   - 去重：有 chrom `!duplicated(data[, c(chrom_col, "position")])`；無 chrom `!duplicated(data$position)`
+   - 代表列過濾：`paste(CHROM, rps_BP, sep=":")` 複合鍵或 `position %in% rps_BP`
+   - **此路徑的限制**：同 bp 多 SNP 只保留首次，可能標到不顯著的那顆
 6. 建立 `rps_BP = position`、`rps_ID = data[[id_col]]` (若可得)
 7. 挑選欲攜帶的欄位：`c(rps_BP, [CHROM], [rps_ID], <其他原始欄位>)`，剔除 `position/value/id_col` 避免重複
 8. **Join**：`merge(blocks, repr, by = merge_keys, all.x = TRUE)`，`merge_keys = c("CHROM","rps_BP")` 或 `"rps_BP"`
@@ -360,7 +366,7 @@ utils::zip(path, files = list.files(tmp_dir), flags = "-j")  # -j: 不存路徑
 
 ## 11. 已知限制與未來方向 (Known Limitations / Future Work)
 
-1. **同 bp 多 SNP**：`annotate_blocks()` 目前以 `!duplicated(position)` 去重，會丟掉同 bp 的 alt allele。預期未來版本支援 (REF/ALT 複合鍵)。
+1. **同 bp 多 SNP**：已修正。`physical_merge()` 記錄代表 SNP 的輸入列號於 `attr(blocks, "rps_row")`，`annotate_blocks()` 據此取列。僅在 blocks 不帶該 attribute 時才退回舊的去重比對。實測某染色體 22 的 PLINK2 檔，542 個 block 中原有 2 個標錯。
 2. **`reset_on = "any"` 的代表 SNP 行為**：window 重置與代表更新分離，是刻意設計。若使用者期望「最後出現的顯著 SNP」當代表，需另外擴充。
 3. **無 LD 資訊**：物理距離合併在高 LD 區 (如 MHC) 可能過度或不足合併。建議搭配 region-specific window。
 4. **跨染色體保護**：250 Mb 啟發式僅在沒有 `CHROM` 欄時觸發。最佳實踐：永遠提供 `CHROM`。
@@ -378,6 +384,7 @@ utils::zip(path, files = list.files(tmp_dir), flags = "-j")  # -j: 不存路徑
 - per-chrom 分流的 serial 重編
 - `read_sumstat` 三種 format 的欄位 fallback
 - `export_snp_list` 的 wd 復原 (on.exit) 行為
+- 同 bp 兩顆 SNP 時代表 SNP 的正確性，以及無 `rps_row` attribute 時的回退
 - 邊界：空資料、單一 block、跨 chr 邊界
 
 ---
