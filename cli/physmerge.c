@@ -21,6 +21,7 @@
 #include <string.h>
 #include <math.h>
 #include <errno.h>
+#include <sys/stat.h>
 #ifdef _MSC_VER
 #  define strdup _strdup
 #endif
@@ -33,12 +34,34 @@
 
 static void die(const char *fmt, ...);
 
+/* Output files this run created.  A fatal error removes them, so a failed run
+   never leaves a truncated block table that looks like a complete one. */
+static const char *g_out_path = NULL, *g_snp_path = NULL;
+static char g_snpdir_file[4096] = {0};
+
 /* ------------------------------------------------------------------ utils */
 static void die(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     fputs("physmerge: error: ", stderr);
     vfprintf(stderr, fmt, ap); fputc('\n', stderr);
-    va_end(ap); exit(2);
+    va_end(ap);
+    if (g_out_path)      remove(g_out_path);
+    if (g_snp_path)      remove(g_snp_path);
+    if (g_snpdir_file[0]) remove(g_snpdir_file);
+    exit(2);
+}
+
+/* Refuse to write over the file we are reading: the output is opened for
+   truncation while the input is still being streamed. */
+static int same_file(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    if (!strcmp(a, b)) return 1;
+#ifndef _MSC_VER
+    struct stat sa, sb;
+    if (stat(a, &sa) == 0 && stat(b, &sb) == 0)
+        return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+#endif
+    return 0;
 }
 static void *xmalloc(size_t n) { void *p = malloc(n); if (!p) die("out of memory"); return p; }
 static void *xrealloc(void *q, size_t n) { void *p = realloc(q, n); if (!p) die("out of memory"); return p; }
@@ -246,10 +269,16 @@ static void stage(Core *c, Block *b) {
 static void open_snpdir_file(Core *c) {
     if (!c->snpdir) return;
     if (c->snpf) fclose(c->snpf);
+    /* the chromosome comes from the input file, so keep it out of the path */
+    char safe[64]; size_t k = 0;
+    for (const char *q = sget(&c->chrom); *q && k + 1 < sizeof safe; q++)
+        safe[k++] = (*q == '/' || *q == '\\' || *q == '.') ? '_' : *q;
+    safe[k] = '\0';
     char path[4096];
-    snprintf(path, sizeof path, "%s/snp_ch%s.txt", c->snpdir, sget(&c->chrom));
+    snprintf(path, sizeof path, "%s/snp_ch%s.txt", c->snpdir, safe);
     c->snpf = fopen(path, "w");
     if (!c->snpf) die("cannot write '%s': %s", path, strerror(errno));
+    snprintf(g_snpdir_file, sizeof g_snpdir_file, "%s", path);
 }
 
 static void close_block(Core *c, double last_inblock_pos) {
@@ -443,6 +472,11 @@ int main(int argc, char **argv) {
     /* read_sumstat normalizes #CHROM -> CHROM */
     if (chrom_col && !strcmp(chrom_col, "#CHROM")) chrom_col = "CHROM";
 
+    if (same_file(in_path, out_path))
+        die("--out is the same file as --input; choose a different output path");
+    if (same_file(in_path, snp_path))
+        die("--snp-list is the same file as --input; choose a different output path");
+
     Reader rd; rd_open(&rd, in_path);
     char *hdr = rd_line(&rd);
     if (!hdr) die("empty input file");
@@ -503,7 +537,8 @@ int main(int argc, char **argv) {
     c.value_name = value_col;
     c.out = out_path ? fopen(out_path, "w") : stdout;
     if (!c.out) die("cannot write '%s': %s", out_path, strerror(errno));
-    if (snp_path) { c.snpf = fopen(snp_path, "w"); if (!c.snpf) die("cannot write '%s': %s", snp_path, strerror(errno)); }
+    g_out_path = out_path;
+    if (snp_path) { c.snpf = fopen(snp_path, "w"); if (!c.snpf) die("cannot write '%s': %s", snp_path, strerror(errno)); g_snp_path = snp_path; }
     if (snp_dir) c.snpdir = strdup(snp_dir);
     c.steps = window; c.sig_this = sig_th;
 
@@ -598,6 +633,7 @@ int main(int argc, char **argv) {
 
     if (c.out != stdout) fclose(c.out);
     if (c.snpf) fclose(c.snpf);
+    g_out_path = g_snp_path = NULL; g_snpdir_file[0] = '\0';   /* run succeeded */
 
     if (!quiet) {
         if (test_filter) fprintf(stderr, "physmerge: TEST filter: kept %lu of %lu rows where %s = '%s'.\n",

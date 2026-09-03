@@ -98,12 +98,14 @@ physmerge --version
 ## 2. Quick start
 
 The repository ships a small example file, so the commands below run without any
-data of your own:
+data of your own. From the `cli` directory you were left in by the build:
 
 ```bash
-cd cli/example
+cd example
 physmerge --input demo.glm.linear --format plink2
 ```
+
+From the top of the repository it is `cd cli/example` instead.
 
 ```
 physmerge: TEST filter: kept 52 of 59 rows where TEST = 'ADD'.
@@ -115,7 +117,7 @@ serial  CHROM  start    end      rps_BP   rps_ID    rps_P
 3       2      0        1000000  500000   rs100042  9.9e-20
 ```
 
-`cli/example/demo.sh` walks through six variations of the same file.
+`./demo.sh` in that directory walks through six variations of the same file.
 
 The equivalent in R:
 
