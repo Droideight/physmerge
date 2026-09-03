@@ -85,6 +85,20 @@ is true of PLINK2, REGENIE, BOLT-LMM and GCTA output. If that does not hold,
 the tool stops with a message and `--sort` buffers and stable-sorts the records
 exactly as R's `order()` would, at the cost of ~32 bytes per SNP.
 
+## Safety guards
+
+A run that fails does not leave output behind: if the tool stops with an error,
+any file it had started writing through `--out`, `--snp-list` or
+`--snp-list-dir` is removed, so a truncated block table can never be mistaken
+for a complete one. `--out` and `--snp-list` are refused when they name the file
+being read, which would otherwise be truncated while it is still being streamed.
+Chromosome values are input data, so the `/`, `\` and `.` characters in them are
+replaced before they are used in a `--snp-list-dir` file name.
+
+`tests_edge.sh` covers these guards along with CRLF input, short rows, a
+header-only file, separator detection, a line larger than the read buffer,
+stdin, the significance boundary, and the argument checks.
+
 ## Fidelity to the R implementation
 
 `validate_vs_R.R` runs 212 randomized comparisons against
