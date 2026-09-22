@@ -1,5 +1,5 @@
 %macro pm_version;
-  %put NOTE: physmerge for SAS 0.3.0 (sas-1), matching physmerge R 0.3.0.;
+  %put NOTE: physmerge for SAS 0.4.0 (sas-1), matching physmerge R 0.4.0.;
 %mend pm_version;
 
 %macro pm_vtype(ds, var);

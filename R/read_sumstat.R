@@ -18,8 +18,10 @@
 #' Overrides the format default when supplied. Common choices: \code{"P"},
 #' \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.
 #' @param chrom_col Chromosome column name. Overrides format default.
-#' Set to \code{NA} for a file with no chromosome column, in which case the
-#' whole file is merged as one sequence.
+#' Set to \code{NA} to ignore the chromosome column and merge the whole file
+#' as one sequence; a column named \code{CHROM} is then kept in the data
+#' under its PLINK name \code{#CHROM}, so \code{\link{physical_merge}} does
+#' not pick it up again.
 #' @param pos_col Position column name. Overrides format default.
 #' @param id_col SNP ID column name. Overrides format default.
 #' Set to \code{NA} if no ID column exists.
@@ -93,10 +95,9 @@ read_sumstat <- function(path,
   test_filter <- test_filter %||% defaults$test_filter
 
   if (is.null(id_col)) id_col <- NA_character_
-  if (is.null(chrom_col)) chrom_col <- NA_character_
 
-  if (is.null(pos_col) || is.null(value_col))
-    stop("For format = 'custom', you must supply pos_col and value_col, plus chrom_col (or chrom_col = NA when the file has no chromosome column).")
+  if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
+    stop("For format = 'custom', you must supply chrom_col, pos_col, and value_col; set chrom_col = NA to ignore the chromosome column.")
 
   df <- tryCatch(
     as.data.frame(data.table::fread(path, header = TRUE,
@@ -105,8 +106,12 @@ read_sumstat <- function(path,
     error = function(e) stop("Failed to read file: ", conditionMessage(e))
   )
 
-  names(df)[names(df) == "#CHROM"] <- "CHROM"
-  if (!is.na(chrom_col) && chrom_col == "#CHROM") chrom_col <- "CHROM"
+  if (is.na(chrom_col)) {
+    names(df)[names(df) == "CHROM"] <- "#CHROM"
+  } else {
+    names(df)[names(df) == "#CHROM"] <- "CHROM"
+    if (chrom_col == "#CHROM") chrom_col <- "CHROM"
+  }
 
   needed <- c(pos_col, value_col)
   if (!is.na(chrom_col)) needed <- c(chrom_col, needed)

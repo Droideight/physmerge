@@ -36,8 +36,10 @@ Overrides the format default when supplied. Common choices: \code{"P"},
 \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.}
 
 \item{chrom_col}{Chromosome column name. Overrides format default.
-Set to \code{NA} for a file with no chromosome column, in which case the
-whole file is merged as one sequence.}
+Set to \code{NA} to ignore the chromosome column and merge the whole file
+as one sequence; a column named \code{CHROM} is then kept in the data
+under its PLINK name \code{#CHROM}, so \code{\link{physical_merge}} does
+not pick it up again.}
 
 \item{pos_col}{Position column name. Overrides format default.}
 

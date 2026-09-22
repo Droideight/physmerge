@@ -281,9 +281,9 @@ block whenever the next significant SNP lies within the window of the current
 one, which is the union of the ±window intervals around all significant SNPs;
 `best` refills the window only when a more significant SNP appears.
 
-For a file with no chromosome column, pass `--no-chrom` on the command line, or
-`chrom_col = NA` to `read_sumstat()`; the whole file is then merged as one
-sequence.
+To merge a file as one sequence, pass `--no-chrom` on the command line, or
+`chrom_col = NA` to `read_sumstat()`. Both work whether or not the file has a
+chromosome column, and both ignore it when it is there.
 
 Input may be plain text, gzip (`.gz`), or `-` for stdin. A file that is not
 position-sorted within a chromosome is rejected by the executable with a message

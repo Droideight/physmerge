@@ -14,7 +14,7 @@
 #include <zlib.h>
 #endif
 
-#define PM_VERSION "0.3.0"
+#define PM_VERSION "0.4.0"
 #define PM_BUILD "c-cli-1"
 
 static void die(const char *fmt, ...);
