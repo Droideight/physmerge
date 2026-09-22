@@ -11,8 +11,8 @@ nozlib: physmerge.c
 	$(CC) $(CFLAGS) -DPHYSMERGE_NO_ZLIB -o physmerge physmerge.c
 
 install: physmerge
-	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 physmerge $(DESTDIR)$(PREFIX)/bin/physmerge
+	install -d "$(DESTDIR)$(PREFIX)/bin"
+	install -m 755 physmerge "$(DESTDIR)$(PREFIX)/bin/physmerge"
 
 clean:
 	rm -f physmerge

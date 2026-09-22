@@ -212,7 +212,7 @@
 %mend pm_prep;
 
 %macro physmerge(data=, out=pm_blocks, sig_th=5e-8, window=500000,
-  reward=min, reset_on=best,
+  reward=min, reset_on=any,
   chrom=, pos=POSITION, value=VALUE, id=,
   idlen=200, chromlen=32, quiet=0);
 

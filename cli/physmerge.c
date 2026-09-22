@@ -205,6 +205,7 @@ typedef struct {
     FILE *out, *snpf;
     char *snpdir;
     const char *vname;
+    char *hdr;
 
     Sbuf chrom;
     int chset, inblk, hascur, hashld;
@@ -222,8 +223,16 @@ static void fmt_pos(char *dst, size_t n, double v) {
     else snprintf(dst, n, "%.10g", v);
 }
 
+static void puthdr(Core *c) {
+    if (!c->hdr) return;
+    fputs(c->hdr, c->out);
+    free(c->hdr);
+    c->hdr = NULL;
+}
+
 static void emit(Core *c, Block *b) {
     char s1[64], s2[64], s3[64];
+    puthdr(c);
     if (b->end < b->start) b->end = b->start;
     fmt_pos(s1, sizeof s1, b->start);
     fmt_pos(s2, sizeof s2, b->end);
@@ -234,7 +243,7 @@ static void emit(Core *c, Block *b) {
     if (c->havech) fprintf(c->out, "\t%s", sget(&c->chrom));
     fprintf(c->out, "\t%s\t%s\t%s", s1, s2, s3);
     if (c->haveid) fprintf(c->out, "\t%s", sget(&b->id));
-    fprintf(c->out, "\t%.17g", b->val);
+    fprintf(c->out, "\t%.10g", b->val);
     if (c->annot) fprintf(c->out, "\t%s", sget(&b->line));
     fputc('\n', c->out);
 
@@ -386,7 +395,7 @@ static const char *USAGE =
 "  -s, --sig-th NUM       significance threshold (default 5e-8)\n"
 "  -w, --window NUM       window in bp (default 500000)\n"
 "  -r, --reward min|max   min for p-values (default), max for statistics\n"
-"      --reset-on best|any  window reset rule (default best)\n"
+"      --reset-on best|any  window reset rule (default any)\n"
 "\n"
 "Output\n"
 "  -o, --out FILE         block table (default stdout)\n"
@@ -406,7 +415,7 @@ int main(int argc, char **argv) {
     int tfilt = -1, dosort = 0, quiet = 0, nohdr = 0, annot = 0, nochr = 0;
     char sep = 0;
     double sig = 5e-8, window = 500000.0;
-    int rmax = 0, rany = 0;
+    int rmax = 0, rany = 1;
 
 #define NEXTARG(name) (++i < argc ? argv[i] : (die("missing value for %s", name), (char*)NULL))
     for (int i = 1; i < argc; i++) {
@@ -543,13 +552,17 @@ int main(int argc, char **argv) {
     c.steps = window; c.best = sig;
 
     if (!nohdr) {
-        fputs("serial", c.out);
-        if (c.havech) fputs("\tCHROM", c.out);
-        fputs("\tstart\tend\trps_BP", c.out);
-        if (c.haveid) fputs("\trps_ID", c.out);
-        fprintf(c.out, "\trps_%s", vcol);
-        if (annot) fprintf(c.out, "\t%s", hcopy);
-        fputc('\n', c.out);
+        size_t hn = strlen(vcol) + (annot && hcopy ? strlen(hcopy) : 0) + 128;
+        char *h = xmalloc(hn);
+        h[0] = '\0';
+        strcat(h, "serial");
+        if (c.havech) strcat(h, "\tCHROM");
+        strcat(h, "\tstart\tend\trps_BP");
+        if (c.haveid) strcat(h, "\trps_ID");
+        strcat(h, "\trps_"); strcat(h, vcol);
+        if (annot && hcopy) { strcat(h, "\t"); strcat(h, hcopy); }
+        strcat(h, "\n");
+        c.hdr = h;
     }
 
     unsigned long nread = 0, nkept = 0, ntdrop = 0, ncdrop = 0, nna = 0;
@@ -635,6 +648,7 @@ int main(int argc, char **argv) {
                       aget(&arena, recs[k].id_off), aget(&arena, recs[k].line_off));
     }
     endch(&c);
+    puthdr(&c);
 
     if (c.out != stdout) fclose(c.out);
     if (c.snpf) fclose(c.snpf);

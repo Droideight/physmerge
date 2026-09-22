@@ -35,7 +35,9 @@ read_sumstat(
 Overrides the format default when supplied. Common choices: \code{"P"},
 \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.}
 
-\item{chrom_col}{Chromosome column name. Overrides format default.}
+\item{chrom_col}{Chromosome column name. Overrides format default.
+Set to \code{NA} for a file with no chromosome column, in which case the
+whole file is merged as one sequence.}
 
 \item{pos_col}{Position column name. Overrides format default.}
 
@@ -71,7 +73,7 @@ test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
 \description{
 A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP
 output, and arbitrary tabular formats. Uses \code{data.table::fread} for
-fast, separator-agnostic reading.
+fast, separator-agnostic reading; \pkg{data.table} is required.
 }
 \examples{
 \dontrun{

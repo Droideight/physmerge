@@ -22,13 +22,12 @@
 #' significant) SNP is found inside the block is controlled by
 #' \code{reset_on}:
 #' \describe{
-#' \item{\code{"best"} (default)}{Steps reset only when a \emph{more}
-#' significant SNP is found. The representative SNP is always the
-#' local maximum.}
-#' \item{\code{"any"}}{Steps reset whenever \emph{any} significant SNP
-#' is found, regardless of its value. This is equivalent to taking
-#' the union of \eqn{\pm}\code{window} intervals around every
-#' significant SNP (i.e. locusDefiner-style logic).}
+#' \item{\code{"any"} (default)}{Steps reset whenever \emph{any}
+#' significant SNP is found, regardless of its value. This is
+#' equivalent to taking the union of \eqn{\pm}\code{window} intervals
+#' around every significant SNP (i.e. locusDefiner-style logic).}
+#' \item{\code{"best"}}{Steps reset only when a \emph{more} significant
+#' SNP is found. The representative SNP is always the local maximum.}
 #' }
 #' \item \strong{Collapse pass}: merges adjacent blocks whose representative
 #' SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
@@ -51,10 +50,10 @@
 #' @param window Window size in base-pairs (positive numeric).
 #' @param reward \code{"min"} (default) for p-values; \code{"max"} for
 #' test statistics.
-#' @param reset_on \code{"best"} (default): steps reset only when a more
-#' significant SNP is encountered inside the current block.
-#' \code{"any"}: steps reset whenever any significant SNP is encountered,
-#' equivalent to the union-of-intervals logic used by locusDefiner.
+#' @param reset_on \code{"any"} (default): steps reset whenever any
+#' significant SNP is encountered inside the current block, equivalent to
+#' the union-of-intervals logic used by locusDefiner. \code{"best"}: steps
+#' reset only when a more significant SNP is encountered.
 #' @param chrom_col Name of the chromosome column in \code{data}. If
 #' \code{NULL} (default), the function auto-detects a column named
 #' \code{"CHROM"}. When a chromosome column is found and contains more
@@ -85,14 +84,14 @@
 #' position = c(100, 200, 350, 5000, 5100, 5200, 9000),
 #' value = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 #' )
-#' # default: reset only on more significant SNP
+#' # default: reset on any significant SNP
 #' physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
 #'
-#' # locusDefiner-equivalent: reset on any significant SNP
+#' # reset only when a more significant SNP appears
 #' physical_merge(df, sig_th = 0.05, window = 500, reward = "min",
-#' reset_on = "any")
+#' reset_on = "best")
 physical_merge <- function(data, sig_th, window, reward = "min",
-                           reset_on = "best", chrom_col = NULL) {
+                           reset_on = "any", chrom_col = NULL) {
 
   if (!is.data.frame(data))
     stop("`data` must be a data frame.")

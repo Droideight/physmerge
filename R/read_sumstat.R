@@ -2,7 +2,7 @@
 #'
 #' A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP
 #' output, and arbitrary tabular formats. Uses \code{data.table::fread} for
-#' fast, separator-agnostic reading.
+#' fast, separator-agnostic reading; \pkg{data.table} is required.
 #'
 #' @param path Path to the file (.csv, .tsv, .txt, or compressed).
 #' @param format One of \code{"plink2"}, \code{"gpcm"}, or \code{"custom"}.
@@ -18,6 +18,8 @@
 #' Overrides the format default when supplied. Common choices: \code{"P"},
 #' \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.
 #' @param chrom_col Chromosome column name. Overrides format default.
+#' Set to \code{NA} for a file with no chromosome column, in which case the
+#' whole file is merged as one sequence.
 #' @param pos_col Position column name. Overrides format default.
 #' @param id_col SNP ID column name. Overrides format default.
 #' Set to \code{NA} if no ID column exists.
@@ -91,9 +93,10 @@ read_sumstat <- function(path,
   test_filter <- test_filter %||% defaults$test_filter
 
   if (is.null(id_col)) id_col <- NA_character_
+  if (is.null(chrom_col)) chrom_col <- NA_character_
 
-  if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
-    stop("For format = 'custom', you must supply chrom_col, pos_col, and value_col.")
+  if (is.null(pos_col) || is.null(value_col))
+    stop("For format = 'custom', you must supply pos_col and value_col, plus chrom_col (or chrom_col = NA when the file has no chromosome column).")
 
   df <- tryCatch(
     as.data.frame(data.table::fread(path, header = TRUE,
@@ -103,9 +106,10 @@ read_sumstat <- function(path,
   )
 
   names(df)[names(df) == "#CHROM"] <- "CHROM"
-  if (chrom_col == "#CHROM") chrom_col <- "CHROM"
+  if (!is.na(chrom_col) && chrom_col == "#CHROM") chrom_col <- "CHROM"
 
-  needed <- c(chrom_col, pos_col, value_col)
+  needed <- c(pos_col, value_col)
+  if (!is.na(chrom_col)) needed <- c(chrom_col, needed)
   if (!is.na(id_col)) needed <- c(needed, id_col)
   missing <- setdiff(needed, names(df))
   if (length(missing) > 0L)
@@ -124,7 +128,7 @@ read_sumstat <- function(path,
     }
   }
 
-  if (!is.null(chrom)) {
+  if (!is.null(chrom) && !is.na(chrom_col)) {
     df <- df[as.character(df[[chrom_col]]) %in% as.character(chrom), ]
     if (nrow(df) == 0L) warning("No rows remain after chromosome filter.")
   }
@@ -140,7 +144,7 @@ read_sumstat <- function(path,
   if (nrow(df) == 0L)
     stop("No usable rows after filtering.")
 
-  df <- if (chrom_col %in% names(df)) {
+  df <- if (!is.na(chrom_col) && chrom_col %in% names(df)) {
     ch <- as.character(df[[chrom_col]])
     df[order(match(ch, unique(ch)), df$position), ]
   } else {
