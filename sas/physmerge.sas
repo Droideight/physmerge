@@ -31,14 +31,14 @@
     select name into :hit trimmed from dictionary.columns
      where libname = "&lib" and memname = "&mem"
        and (upcase(label) = upcase(symget('pm__want'))
-         or upcase(name)  = upcase(symget('pm__want'))
+         or upcase(name) = upcase(symget('pm__want'))
 
-         or upcase(name)  = upcase(prxchange('s/[^A-Za-z0-9_]/_/', -1,
+         or upcase(name) = upcase(prxchange('s/[^A-Za-z0-9_]/_/', -1,
                                              strip(symget('pm__want'))))
-         or upcase(name)  = upcase(cats('_', prxchange('s/[^A-Za-z0-9_]/_/', -1,
+         or upcase(name) = upcase(cats('_', prxchange('s/[^A-Za-z0-9_]/_/', -1,
                                              strip(symget('pm__want'))))))
      order by case when upcase(label) = upcase(symget('pm__want')) then 1
-                   when upcase(name)  = upcase(symget('pm__want')) then 2
+                   when upcase(name) = upcase(symget('pm__want')) then 2
                    else 3 end;
   quit;
   &hit
@@ -47,23 +47,23 @@
 %macro pm_read(path=, out=pm_sumstat, format=plink2,
                chrom_col=, pos_col=, id_col=, value_col=,
                test_filter=, test_col=TEST, test_val=ADD, chrom=,
-               dlm='09'x, guessingrows=MAX, quiet=0);
+               dlm='09'x, grows=MAX, quiet=0);
 
-  %local fmt vc vp vv vi vt n0 n1 save_vvn;
+  %local fmt vc vp vv vi vt n0 n1 vvn;
   %let fmt = %upcase(&format);
-  %let save_vvn = %sysfunc(getoption(validvarname));
+  %let vvn = %sysfunc(getoption(validvarname));
 
   %if &fmt = PLINK2 %then %do;
     %if %length(&chrom_col) = 0 %then %let chrom_col = %str(#CHROM);
-    %if %length(&pos_col)   = 0 %then %let pos_col   = POS;
-    %if %length(&id_col)    = 0 %then %let id_col    = ID;
+    %if %length(&pos_col) = 0 %then %let pos_col = POS;
+    %if %length(&id_col) = 0 %then %let id_col = ID;
     %if %length(&value_col) = 0 %then %let value_col = P;
     %if %length(&test_filter) = 0 %then %let test_filter = 1;
   %end;
   %else %if &fmt = GPCM %then %do;
     %if %length(&chrom_col) = 0 %then %let chrom_col = %str(#CHROM);
-    %if %length(&pos_col)   = 0 %then %let pos_col   = POS;
-    %if %length(&id_col)    = 0 %then %let id_col    = ID;
+    %if %length(&pos_col) = 0 %then %let pos_col = POS;
+    %if %length(&id_col) = 0 %then %let id_col = ID;
     %if %length(&value_col) = 0 %then %let value_col = P_HPI;
     %if %length(&test_filter) = 0 %then %let test_filter = 0;
   %end;
@@ -82,12 +82,12 @@
   options validvarname=v7;
   proc import datafile="&path" out=_pm_imp dbms=dlm replace;
     delimiter = &dlm;
-    getnames  = yes;
-    guessingrows = &guessingrows;
+    getnames = yes;
+    grows = &grows;
   run;
   %if &syserr > 1 %then %do;
     %put ERROR: Failed to read file: &path;
-    options validvarname=&save_vvn;
+    options validvarname=&vvn;
     %return;
   %end;
 
@@ -106,7 +106,7 @@
   %if %upcase(&id_col) ne _NONE_ and %length(&vi) = 0 %then %let miss = &miss &id_col;
   %if %length(&miss) %then %do;
     %put ERROR: Column(s) not found:&miss;
-    options validvarname=&save_vvn;
+    options validvarname=&vvn;
     %return;
   %end;
 
@@ -125,7 +125,7 @@
         %put NOTE: TEST filter: kept &n1 of &n0 rows where &test_col = "&test_val".;
       %if &n1 = 0 %then %do;
         %put ERROR: No rows remain after TEST filter.;
-        options validvarname=&save_vvn;
+        options validvarname=&vvn;
         %return;
       %end;
     %end;
@@ -154,12 +154,12 @@
 
   %if %pm_nobs(&out) = 0 %then %put ERROR: No usable rows after filtering.;
 
-  options validvarname=&save_vvn;
+  options validvarname=&vvn;
 
   %global pm_chrom_var pm_pos_var pm_id_var pm_value_var pm_reward;
   %let pm_chrom_var = &vc;
-  %let pm_pos_var   = &vp;
-  %let pm_id_var    = &vi;
+  %let pm_pos_var = &vp;
+  %let pm_id_var = &vi;
   %let pm_value_var = &vv;
   %if %index(%str( LOG10_P T_STAT Z_STAT CHISQ F_STAT T_STAT_DIRECT T_STAT_TE HPI ),
              %str( )%upcase(&value_col)%str( )) %then %let pm_reward = max;
@@ -175,7 +175,7 @@
   %let n = 0;
   %let dsid = %sysfunc(open(&ds));
   %if &dsid %then %do;
-    %let n  = %sysfunc(attrn(&dsid, nlobs));
+    %let n = %sysfunc(attrn(&dsid, nlobs));
     %let rc = %sysfunc(close(&dsid));
   %end;
   &n
@@ -183,33 +183,33 @@
 
 %macro pm_prep(data=, out=_pm_prep, chrom=, pos=POSITION, value=VALUE, id=,
                idlen=200, chromlen=32);
-  data &out(keep=_chrord _chrom _pos _val _id _seq);
-    length _chrom $ &chromlen _id $ &idlen _chrord 8;
+  data &out(keep=_cord _chrom _pos _val _id _seq);
+    length _chrom $ &chromlen _id $ &idlen _cord 8;
     if _n_ = 1 then do;
       declare hash _h();
       _h.defineKey('_chrom');
       _h.defineData('_chrord');
       _h.defineDone();
     end;
-    retain _nchr 0;
+    retain _nc 0;
     set &data;
     %if %length(&chrom) %then %do; _chrom = cats(&chrom); %end;
-    %else %do;                     _chrom = '';           %end;
-    %if %length(&id) %then %do;    _id    = cats(&id);    %end;
-    %else %do;                     _id    = '';           %end;
+    %else %do; _chrom = ''; %end;
+    %if %length(&id) %then %do; _id = cats(&id); %end;
+    %else %do; _id = ''; %end;
     _pos = &pos;
     _val = &value;
 
     if missing(_pos) or missing(_val) then delete;
     _seq + 1;
     if _h.find() ne 0 then do;
-      _nchr + 1;
-      _chrord = _nchr;
+      _nc + 1;
+      _cord = _nc;
       _h.add();
     end;
-    drop _nchr;
+    drop _nc;
   run;
-  proc sort data=&out; by _chrord _pos _seq; run;
+  proc sort data=&out; by _cord _pos _seq; run;
 %mend pm_prep;
 
 %macro physmerge(data=, out=pm_blocks, sig_th=5e-8, window=500000,
@@ -241,45 +241,45 @@
            id=&id, idlen=&idlen, chromlen=&chromlen);
   %let nin = %pm_nobs(_pm_prep);
 
-  data _pm_raw(keep=_chrord _chrom start end rps_BP rps_value rps_ID);
+  data _pm_raw(keep=_cord _chrom start end rps_BP rps_value rps_ID);
     length _chrom $ &chromlen rps_ID $ &idlen;
-    retain in_block steps sig_this last_pos start end rps_BP rps_value rps_ID;
+    retain inblk steps best lpos start end rps_BP rps_value rps_ID;
 
     set _pm_prep;
-    by _chrord;
+    by _cord;
 
-    if first._chrord then do;
-      in_block = 0;
-      steps    = &window;
-      sig_this = &sig_th;
-      last_pos = _pos;
+    if first._cord then do;
+      inblk = 0;
+      steps = &window;
+      best = &sig_th;
+      lpos = _pos;
     end;
 
-    if not in_block then do;
+    if not inblk then do;
       if _val &c &sig_th then link pm_open;
     end;
     else do;
-      remaining = steps - (_pos - last_pos);
-      if remaining <= 0 then do;
+      rem = steps - (_pos - lpos);
+      if rem <= 0 then do;
         link pm_close;
         if _val &c &sig_th then link pm_open;
       end;
       else do;
-        steps = remaining;
+        steps = rem;
         %if &ro = ANY %then %do;
 
           if _val &c &sig_th then do;
             steps = &window;
-            if _val &c sig_this then link pm_rep;
+            if _val &c best then link pm_rep;
           end;
-          else if _val &c sig_this then do;
+          else if _val &c best then do;
             steps = &window;
             link pm_rep;
           end;
         %end;
         %else %do;
 
-          if _val &c sig_this then do;
+          if _val &c best then do;
             steps = &window;
             link pm_rep;
           end;
@@ -287,47 +287,47 @@
       end;
     end;
 
-    last_pos = _pos;
-    if last._chrord and in_block then link pm_close;
+    lpos = _pos;
+    if last._cord and inblk then link pm_close;
     return;
 
   pm_open:
-    start     = max(0, _pos - &window);
-    end       = .;
-    rps_BP    = _pos;
+    start = max(0, _pos - &window);
+    end = .;
+    rps_BP = _pos;
     rps_value = _val;
-    rps_ID    = _id;
-    in_block  = 1;
-    steps     = &window;
-    sig_this  = _val;
+    rps_ID = _id;
+    inblk = 1;
+    steps = &window;
+    best = _val;
     return;
 
   pm_rep:
-    sig_this  = _val;
-    rps_BP    = _pos;
+    best = _val;
+    rps_BP = _pos;
     rps_value = _val;
-    rps_ID    = _id;
+    rps_ID = _id;
     return;
 
   pm_close:
-    end      = last_pos + steps;
+    end = lpos + steps;
     output;
-    in_block = 0;
-    steps    = &window;
-    sig_this = &sig_th;
+    inblk = 0;
+    steps = &window;
+    best = &sig_th;
     return;
   run;
 
-  data _pm_col(keep=_chrord h_chrom h_start h_end h_bp h_val h_id);
+  data _pm_col(keep=_cord h_chrom h_start h_end h_bp h_val h_id);
     length h_chrom $ &chromlen h_id $ &idlen;
-    retain has_held h_chrom h_start h_end h_bp h_val h_id;
+    retain held h_chrom h_start h_end h_bp h_val h_id;
     set _pm_raw(rename=(_chrom=i_chrom start=i_start end=i_end
                         rps_BP=i_bp rps_value=i_val rps_ID=i_id));
-    by _chrord;
+    by _cord;
 
-    if first._chrord then has_held = 0;
+    if first._cord then held = 0;
 
-    if has_held then do;
+    if held then do;
       if (i_bp - h_bp) < &window then do;
         if i_end > h_end then h_end = i_end;
         if i_val &c h_val then do;
@@ -342,13 +342,13 @@
     end;
     else link pm_hold;
 
-    if last._chrord and has_held then output;
+    if last._cord and held then output;
     return;
 
   pm_hold:
     h_chrom = i_chrom; h_start = i_start; h_end = i_end;
-    h_bp    = i_bp;    h_val   = i_val;   h_id  = i_id;
-    has_held = 1;
+    h_bp = i_bp; h_val = i_val; h_id = i_id;
+    held = 1;
     return;
   run;
 
@@ -357,12 +357,12 @@
            rps_ID $ &idlen rps_value 8;
     set _pm_col;
     serial + 1;
-    CHROM     = h_chrom;
-    start     = h_start;
+    CHROM = h_chrom;
+    start = h_start;
 
-    end       = max(h_end, h_start);
-    rps_BP    = h_bp;
-    rps_ID    = h_id;
+    end = max(h_end, h_start);
+    rps_BP = h_bp;
+    rps_ID = h_id;
     rps_value = h_val;
   run;
 
@@ -384,8 +384,8 @@
      where libname = 'WORK' and memname = %upcase("&data")
        and upcase(name) not in ('POSITION', 'VALUE'
             %if %length(&chrom) %then , %upcase("&chrom") ;
-            %if %length(&pos)   %then , %upcase("&pos")   ;
-            %if %length(&id)    %then , %upcase("&id")    ; );
+            %if %length(&pos) %then , %upcase("&pos") ;
+            %if %length(&id) %then , %upcase("&id") ; );
   quit;
   %if %length(&keep) %then %let addcols = &keep;
 
@@ -403,7 +403,7 @@
       left join &data as d
         on d.&pos = b.rps_BP
            %if %length(&chrom) %then and cats(d.&chrom) = b.CHROM ;
-           %if %length(&id)    %then and cats(d.&id)    = b.rps_ID ;
+           %if %length(&id) %then and cats(d.&id) = b.rps_ID ;
      order by b.serial;
   quit;
 %mend pm_annotate;
@@ -432,7 +432,7 @@
       set &blocks;
       length _pmline $ 32767;
       %if &t = C %then %do; _pmline = &v; %end;
-      %else %do;             _pmline = strip(put(&v, best32.)); %end;
+      %else %do; _pmline = strip(put(&v, best32.)); %end;
       file "&file" lrecl=32767;
       put _pmline;
     run;
@@ -453,7 +453,7 @@
       _safe = translate(cats(CHROM), '___', '/\.');
       _path = cats("&dir", "/snp_ch", _safe, ".txt");
       %if &t = C %then %do; _pmline = &v; %end;
-      %else %do;             _pmline = strip(put(&v, best32.)); %end;
+      %else %do; _pmline = strip(put(&v, best32.)); %end;
       file _pmout filevar=_path lrecl=32767;
       put _pmline;
     run;
