@@ -287,7 +287,5 @@ merged wrongly; add `--sort` in that case.
 - `cli/PERFORMANCE.txt`: benchmarks, validation, and the known differences from
   the R package
 - `sas/physmerge.sas`: its header is the SAS reference
-- `tests/qa/FINDINGS.txt`: the edge cases the three implementations were checked
-  against, and the probes that found them
 
 MIT licensed.

@@ -69,9 +69,3 @@ bit-exact rather than approximate.
    not carry the attribute still go through the old position join, so existing
    code is unaffected.
 
-## 4. Reproducing
-
-```
-cd cli && make
-cd bench && ./bench.sh 1000000 5000000 10000000
-```

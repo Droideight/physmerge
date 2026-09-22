@@ -18,6 +18,4 @@ Suggests:
     shiny,
     DT,
     shinyjs,
-    data.table,
-    testthat (>= 3.0.0)
-Config/testthat/edition: 3
+    data.table

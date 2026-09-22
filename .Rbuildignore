@@ -4,7 +4,6 @@
 ^\.Rhistory$
 ^cli$
 ^sas$
-^tests/qa$
 ^User Manual\.Rmd$
 ^User-Manual\.html$
 ^obsolete$

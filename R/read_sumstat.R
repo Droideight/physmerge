@@ -76,8 +76,7 @@ read_sumstat <- function(path,
                          chrom       = NULL,
                          ...) {
   
-  format <- match.arg(format) 
-  #allows simplified "p" for plink2 in function
+  format <- match.arg(format)
   
   # ── Format-specific defaults (proofread) ──────────────────────────────────────
   defaults <- list(
@@ -95,8 +94,6 @@ read_sumstat <- function(path,
   value_col   <- value_col   %||% defaults$value
   test_filter <- test_filter %||% defaults$test_filter
 
-  # "no ID column" is spelled NA everywhere below; format = "custom" has no
-  # default ID column, so NULL means the same thing and has to become NA here.
   if (is.null(id_col)) id_col <- NA_character_
   
   if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
@@ -109,12 +106,10 @@ read_sumstat <- function(path,
                                     data.table = FALSE, ...)),
     error = function(e) stop("Failed to read file: ", conditionMessage(e))
   )
-  # if a file without header is supplied, reading is not possible.
   
-  # Normalise #CHROM → CHROM everywhere
+  # Normalise #CHROM → CHROM
   names(df)[names(df) == "#CHROM"] <- "CHROM"
   if (chrom_col == "#CHROM") chrom_col <- "CHROM"
-  # do pay attention all downstream files require CHROM instead of #CHROM
   
   # ── Validate columns ──────────────────────────────────────────────────────────
   needed <- c(chrom_col, pos_col, value_col)
@@ -136,7 +131,6 @@ read_sumstat <- function(path,
         stop("No rows remain after TEST filter.")
     }
   }
-  # if test filt is not found but requested, process will proceed
   
   # ── Chromosome filter ─────────────────────────────────────────────────────────
   if (!is.null(chrom)) {
@@ -158,19 +152,14 @@ read_sumstat <- function(path,
   if (nrow(df) == 0L)
     stop("No usable rows after filtering.")
   
-  # Sort by chromosome, then position.  The chromosome key is the order of
-  # first appearance, matching the order physical_merge() walks, rather than
-  # alphabetical, so the two agree on which block is serial 1.  Sorting on
-  # position alone would interleave chromosomes: the blocks would still come
-  # out right, because physical_merge() re-sorts within each chromosome, but
-  # the frame written out here would be one the C tool rejects.
+  # Sort by chromosome then position
   df <- if (chrom_col %in% names(df)) {
     ch <- as.character(df[[chrom_col]])
     df[order(match(ch, unique(ch)), df$position), ]
   } else {
     df[order(df$position), ]
   }
-  # ascending pos within a chromosome is needed for physical merge.
+  # ascending pos
   
   # ── Suggest reward direction ──────────────────────────────────────────────────
   stat_cols <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
@@ -183,7 +172,6 @@ read_sumstat <- function(path,
     data   = df,
     reward = suggested
   )
-  # the reason why df$data is needed in physical_merge.R
 }
 
 # Null-coalescing operator (internal)
