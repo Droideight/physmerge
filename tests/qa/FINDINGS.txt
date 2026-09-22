@@ -1,0 +1,278 @@
+# Edge-case findings, 2026-09-22
+
+Written by running `tests/qa/*` against physmerge 0.3.0 (R) and
+`cli/physmerge` 0.3.0 (c-cli-1).
+
+**Status: all 15 findings are fixed**, each with a regression test, in
+`tests/testthat/test-edge-cases.R` for the R findings and in
+`cli/tests_edge.sh` for the C ones.
+
+| suite | before | after |
+|---|---|---|
+| `tests/testthat/` | 16 pass, 2 warnings | **39 pass, 0 warnings** |
+| `cli/tests_edge.sh` | 16 pass | **24 pass** |
+| `diff_c_vs_r.R`, 400 random cases | 0 mismatches | **0 mismatches** |
+| `R CMD check` | 3 WARNINGs, 1 NOTE | **Status: OK** |
+| 2M SNPs, streaming | 0.12 s, 2.5 MB peak | **0.12 s, 2.5 MB peak** |
+
+The SAS reference vectors in `sas/testdata/` are byte-identical before and
+after the fixes. That is the check that none of this changed the algorithm's
+answer on well-formed input.
+
+## What was already sound
+
+The existing suites were clean: 16/16 in
+`tests/testthat/test-physical_merge.R`, 16/16 in `cli/tests_edge.sh`. A new
+randomised differential test (`diff_c_vs_r.R`: 400 cases over 1 to 3
+chromosomes, window 1 to 5e5, both `reward` values, both `reset_on` values,
+duplicate positions, ties) found **zero** disagreements between the C tool and
+R, before and after. The C port is faithful.
+
+Everything below is an edge case neither suite reached.
+
+---
+
+## R
+
+### R1. `read_sumstat(format = "custom")` failed unless `id_col` was given
+
+```r
+read_sumstat(f, "custom", chrom_col="CHR", pos_col="BP", value_col="PV")
+#> Error: argument is of length zero
+```
+
+`defaults$id` is `NULL` for `custom`, so `id_col` stayed `NULL`, and
+`if (!is.na(id_col))` evaluated `if (logical(0))`. The documentation says to
+pass `id_col = NA` when there is no ID column, but the default for `custom` was
+`NULL`, not `NA`. Anyone following the roxygen example for a custom format
+without an ID hit this.
+
+**Fixed** in `R/read_sumstat.R`: `id_col` becomes `NA_character_` when it
+resolves to `NULL`, so "no ID column" has one spelling everywhere.
+
+### R2. `read_sumstat()` sorted by position across chromosomes
+
+The sort key was `order(df$position)`, with no chromosome. A four-row,
+two-chromosome file came back interleaved:
+
+```
+CHROM POS ID
+    2 100  b
+    1 500  a
+    2 700  d
+    1 900  c
+```
+
+`physical_merge()` re-sorts within each chromosome, so the blocks were still
+correct. But the returned `$data` is what a user writes out and feeds to the
+next tool, and the C CLI rejects exactly this layout ("chromosome 2 appears in
+more than one block of the file"). The R reader was producing files the C tool
+refuses without `--sort`.
+
+**Fixed**: the sort key is now `order(match(chrom, unique(chrom)), position)`,
+which groups by chromosome in first-appearance order. That is the same order
+`physical_merge()` walks, so the two also agree on which block is serial 1.
+
+### R3. `physical_merge()` gave a cryptic error on any NA
+
+```r
+physical_merge(data.frame(position=c(1,2), value=c(NA,NA)), 5e-8, 5e5)
+#> Error: missing value where TRUE/FALSE needed
+```
+
+Same for an NA in `position`, and for `sig_th = NA`. `read_sumstat()` drops NA
+rows, so this only bit users who built the data frame themselves, which the
+documentation invites since `physical_merge()` is exported and documented as
+taking any data frame with `position` and `value`. The C tool and the SAS port
+both drop such rows and report a count.
+
+**Fixed**: rows with an NA position or value are dropped with a count, matching
+the other two implementations, and `sig_th = NA` is rejected by the validation
+block. The representative row indices are remapped back onto the caller's frame
+afterwards, so `annotate_blocks()` still lines up; there is a test for that.
+
+### R4. A row with `CHROM = NA` was silently dropped
+
+`sel <- which(data[[resolved_chrom]] == ch)` is NA for an NA chromosome, and
+`which()` discards it. No warning, no count. A genome-wide significant SNP
+could disappear.
+
+**Fixed**: an NA chromosome is dropped by the same explicit filter as R3 and
+counted in the same message.
+
+### R5. `export_snp_list()` wrote positions in scientific notation
+
+With no `rps_ID` column it falls back to `rps_BP`, and `as.character(900000)`
+is `"9e+05"`:
+
+```
+1e+06
+2e+06
+3e+06
+```
+
+PLINK `--extract` cannot use this file. Anything at or above 1e5 that is a
+round number was affected.
+
+**Fixed**: a numeric id column goes through
+`format(scientific = FALSE, trim = TRUE)`. The C tool already formatted with
+`%.0f` and the SAS port with `BEST32.`, so both were already correct.
+
+### R6. `export_snp_list(by_chrom = TRUE)` silently lost the output for a relative path
+
+```r
+setwd(outdir)
+export_snp_list(blocks, "lead.zip", by_chrom = TRUE)   # message: "Wrote 2 ..."
+file.exists("lead.zip")                                 # FALSE
+```
+
+`normalizePath(path, mustWork = FALSE)` returns a path that does not exist
+unchanged, so `path` stayed relative. The function then `setwd()`s into a temp
+directory, `utils::zip()` wrote `lead.zip` **there**, and the `on.exit` handler
+deleted the temp directory with the zip inside it. The success message still
+printed.
+
+**Fixed**: a relative path is anchored to the caller's working directory before
+the `setwd()`, and the `utils::zip()` return code is checked, so a failed
+archive raises an error instead of reporting success.
+
+### R7. A chromosome name containing `/` crashed `export_snp_list(by_chrom = TRUE)`
+
+```
+Error in file(con, "w") : cannot open the connection
+... cannot open file '.../snp_ch1/../evil.txt'
+```
+
+The C tool sanitises the chromosome before it becomes part of a path, and
+`cli/tests_edge.sh` tests that; the R function did not. It errored rather than
+escaping the directory, so this was robustness, not a security hole, but the
+two implementations should agree.
+
+**Fixed**: `/`, `\` and `.` become `_`, the same three characters the C tool
+replaces, and two names that collide once sanitised are refused rather than one
+silently overwriting the other.
+
+### R8. `physical_merge()` on an empty data frame warned twice
+
+```
+Warning: no non-missing arguments to min; returning Inf
+Warning: no non-missing arguments to max; returning -Inf
+```
+
+From `diff(range(...))` in the no-chromosome-column branch.
+
+**Fixed**: an empty frame returns its empty block table before reaching that
+branch.
+
+### R9. `annotate_blocks()` with every `keep_*` set to `FALSE` errored
+
+```
+Error: argument 1 is not a vector
+```
+
+`meta` was `NULL` in `.finish_annotation()`, and `unique(NULL)` then
+`out[, c(NULL, rest)]` fails. An edge case, but all six arguments are public.
+
+**Fixed**: `meta` is built as `character(0)` rather than `NULL`, the ordering
+step is skipped when `serial` has been dropped, and asking for a table with no
+columns at all is now an explicit error.
+
+### R10. `annotate_blocks()` accepted the wrong `data` and returned all-NA
+
+Passing blocks from one data set and a different `data` returned a table of NAs
+rather than an error.
+
+**Fixed**: the position-join path warns when no block matched a row of `data`,
+and separately when only some did.
+
+### R11. Negative positions produced `end < start`
+
+```r
+physical_merge(data.frame(position=c(-1000,-200), value=c(1e-9,1e-9)), 5e-8, 500)
+#>   serial start  end rps_BP
+#> 1      1     0 -500  -1000
+```
+
+`start` was clamped with `max(0, pos - window)` but `end` was not, so the
+interval inverted. The C tool did the same thing.
+
+**Fixed in all three implementations**: `end` is clamped to at least `start`,
+and R and C each warn once when a negative position is seen. For non-negative
+positions the clamp is a no-op, because `max(0, rps - w)` is monotone in `rps`,
+so a trimmed `end` is never below its own `start`. That is why the SAS vectors
+did not move.
+
+---
+
+## C tool
+
+All four were divergences from what `data.table::fread()` does with the same
+file, which matters because the R reader and the C tool have to agree about
+what a file says.
+
+### C1. Quoted fields were not handled
+
+```
+#CHROM,POS,ID,P
+1,1000,"rs1,alt",1e-9
+```
+
+The quoted comma split the row, `POS` landed in the wrong field, and the record
+was dropped **silently**, counted only in the "dropped (NA in position or
+value)" total. `fread()` reads it correctly. CSV input is the documented `gpcm`
+path.
+
+**Fixed** in `split_line()`: a field beginning with `"` is read to the matching
+quote, with `""` standing for one `"`. Unquoting only shortens a field, so it
+is still done in place and the reader stays allocation-free.
+
+### C2. A UTF-8 BOM broke header matching
+
+```
+physmerge: error: Column(s) not found: CHROM
+```
+
+Anything exported from Excel has one. `fread()` strips it.
+
+**Fixed**: the three BOM bytes are skipped before the header is indexed.
+
+### C3. Runs of spaces shifted every column
+
+With `--sep ' '`, `1  1000 a 1e-9` parsed as `1`, ``, `1000`, `a`; `POS` was
+empty and the row was dropped. `fread()` collapses whitespace runs. Legacy
+space-padded summary statistics were affected.
+
+**Fixed**: when the separator is a space the file is read as
+whitespace-delimited, so a run of spaces or tabs is one separator and leading
+whitespace is skipped. Tab- and comma-separated files are untouched, and there
+is a test that an empty field in a TSV is still an empty field.
+
+### C4. Long chromosome names collided in `--snp-list-dir`
+
+The sanitiser truncated to 63 characters, so two contigs that differed only
+after character 63 wrote to the same `snp_ch*.txt` and one overwrote the other.
+Not reachable with standard chromosome names; reachable with unplaced-contig
+names from a custom build.
+
+**Fixed**: the buffer is 256 bytes, and a name that still does not fit is a
+fatal error rather than a silent truncation.
+
+---
+
+## Still open: packaging hygiene
+
+`R CMD check` reports `Status: OK` now, but two of the four things it flagged
+were settled by excluding them from the build rather than by putting them
+right, and they are yours to decide.
+
+- **`.RDataTmp`, `.RDataTmp1`, `.RDataTmp2`** at the package root, 190 MB of
+  leftover R session dumps. Now in `.Rbuildignore` and `.gitignore`, but still
+  on disk. They look like session leftovers rather than anything anyone needs.
+- **`User Manual.Rmd`** has a space in the file name, which is not portable.
+  Renaming it to `User-Manual.Rmd` would settle it, but it is a file you read,
+  so it is your call.
+- **`DESCRIPTION`** still has `your@email.com` in `Authors@R`.
+
+The other two are fixed: `cli/physmerge` no longer ships in the source tarball,
+and the broken `\link{read_sumstat$data}` cross-reference in
+`man/annotate_blocks.Rd` now points at `read_sumstat`.

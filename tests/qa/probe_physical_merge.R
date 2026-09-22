@@ -1,0 +1,50 @@
+PKG <- Sys.getenv("PHYSMERGE_PKG", unset = normalizePath("."))
+for (f in list.files(file.path(PKG,"R"), pattern="\\.R$", full.names=TRUE)) source(f)
+t <- function(id, expr) {
+  ws <- character()
+  r <- withCallingHandlers(
+      tryCatch(list(ok=TRUE, v=suppressMessages(eval(expr, parent.frame()))),
+               error=function(e) list(ok=FALSE, v=conditionMessage(e))),
+      warning=function(w){ ws <<- c(ws, conditionMessage(w)); invokeRestart("muffleWarning")})
+  cat(sprintf("\n[%s] %s\n", id, if (r$ok) "" else paste("ERROR:", r$v)))
+  for (w in ws) cat("   WARN:", w, "\n")
+  if (r$ok) print(r$v)
+  invisible(r$v)
+}
+d <- function(pos, val, chrom=NULL) {
+  x <- data.frame(position=as.numeric(pos), value=as.numeric(val))
+  if (!is.null(chrom)) x$CHROM <- chrom
+  x
+}
+cat("================ M2 physical_merge ================\n")
+t("N1 two separated peaks", quote(physical_merge(d(c(1000,1200,900000,901000), c(1e-9,1e-10,1e-12,0.4)), 5e-8, 5e5)))
+t("E1 empty data frame",    quote(physical_merge(d(numeric(0), numeric(0)), 5e-8, 5e5)))
+t("E2 one row, significant",quote(physical_merge(d(1000, 1e-9), 5e-8, 5e5)))
+t("E3 none significant",    quote(physical_merge(d(c(1,2,3), c(.9,.8,.7)), 5e-8, 5e5)))
+t("E4 all NA values",       quote(physical_merge(d(c(1,2), c(NA,NA)), 5e-8, 5e5)))
+t("E5 some NA values",      quote(physical_merge(d(c(1,500000,900000), c(1e-9,NA,1e-9)), 5e-8, 5e5)))
+t("E6 NA in position",      quote(physical_merge(d(c(1,NA,900000), c(1e-9,1e-9,1e-9)), 5e-8, 5e5)))
+t("E7 duplicate positions", quote(physical_merge(d(c(1000,1000,1000), c(1e-9,1e-12,1e-10)), 5e-8, 5e5)))
+t("E8 unsorted input",      quote(physical_merge(d(c(900000,1000,1200), c(1e-12,1e-9,1e-10)), 5e-8, 5e5)))
+t("E9 window bigger than genome", quote(physical_merge(d(c(1000,2.4e8), c(1e-9,1e-9)), 5e-8, 3e8)))
+t("E10 window = 1",         quote(physical_merge(d(c(1000,1001,1002), c(1e-9,1e-9,1e-9)), 5e-8, 1)))
+t("E11 sig_th = NA",        quote(physical_merge(d(c(1,2), c(1e-9,1e-9)), NA_real_, 500)))
+t("E12 sig_th = Inf",       quote(physical_merge(d(c(1,2), c(1e-9,1e-9)), Inf, 500)))
+t("E13 value = -Inf",       quote(physical_merge(d(c(1,700), c(-Inf,1e-9)), 5e-8, 500)))
+t("E14 negative positions", quote(physical_merge(d(c(-1000,-200), c(1e-9,1e-9)), 5e-8, 500)))
+t("E15 reward=max stats",   quote(physical_merge(d(c(1000,1200,900000), c(30,45,60)), 5.45, 5e5, reward="max")))
+t("E16 reset_on=any",       quote(physical_merge(d(seq(1000, 5000, by=400), rep(1e-9, 11)), 5e-8, 1000, reset_on="any")))
+t("E17 reset_on=best same", quote(physical_merge(d(seq(1000, 5000, by=400), rep(1e-9, 11)), 5e-8, 1000, reset_on="best")))
+t("E18 multi-chrom",        quote(physical_merge(d(c(1000,2000,1000,2000), rep(1e-9,4), chrom=c(1,1,2,2)), 5e-8, 500)))
+t("E19 multi-chrom, one empty", quote(physical_merge(d(c(1000,1000), c(1e-9,0.5), chrom=c(1,2)), 5e-8, 500)))
+t("E20 multi-chrom all empty",  quote(physical_merge(d(c(1000,1000), c(0.5,0.5), chrom=c(1,2)), 5e-8, 500)))
+t("E21 CHROM as factor",    quote(physical_merge(local({x<-d(c(1000,1000), c(1e-9,1e-9), chrom=factor(c("1","2")));x}), 5e-8, 500)))
+t("E22 CHROM unsorted, interleaved rows", quote(physical_merge(d(c(100,100,900,900), rep(1e-9,4), chrom=c(1,2,1,2)), 5e-8, 500)))
+t("E23 chrX / string chrom",quote(physical_merge(d(c(1000,1000), c(1e-9,1e-9), chrom=c("X","1")), 5e-8, 500)))
+t("E24 CHROM has NA",       quote(physical_merge(d(c(1000,1000), c(1e-9,1e-9), chrom=c(1,NA)), 5e-8, 500)))
+t("E25 no CHROM, 300Mb span",quote(physical_merge(d(c(1000,2.9e8), c(1e-9,1e-9)), 5e-8, 500)))
+t("E26 integer position col",quote(physical_merge(data.frame(position=c(1000L,2000L), value=c(1e-9,1e-9)), 5e-8, 500)))
+t("E27 tibble-ish extra cols",quote(physical_merge(cbind(d(c(1000,2000), c(1e-9,1e-9)), junk=c("a","b")), 5e-8, 500)))
+t("E28 three blocks chain (collapse)", quote(physical_merge(d(c(1000,1400,1800,2200), c(1e-9,0.5,1e-9,1e-9)), 5e-8, 500)))
+t("E29 window as integer",  quote(physical_merge(d(c(1000,2000), c(1e-9,1e-9)), 5e-8, 500L)))
+t("E30 value ties exactly", quote(physical_merge(d(c(1000,1200,1400), c(1e-9,1e-9,1e-9)), 5e-8, 500)))
