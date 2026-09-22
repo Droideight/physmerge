@@ -260,8 +260,8 @@ merged wrongly; add `--sort` in that case.
 ## 6. More
 
 - `cli/README.md`: build details, memory model, differences from the R package
-- `cli/PERFORMANCE.md`: benchmarks and the validation suites
-- `TECHNICAL_SPEC.md`: algorithm, data contract, edge cases (in Chinese)
+- `cli/PERFORMANCE.txt`: benchmarks and the validation suites
+- `TECHNICAL_SPEC.txt`: algorithm, data contract, edge cases (in Chinese)
 - `physmerge --help`: every flag
 
 MIT licensed.

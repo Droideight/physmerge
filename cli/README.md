@@ -122,8 +122,8 @@ Both suites pass with zero mismatches. Two intentional differences:
    `annotate_blocks()`, which deduplicated the input on position and could
    therefore label a block with the non-significant variant at a multi-allelic
    site. Fixed in physmerge 0.3.0 via `attr(blocks, "rps_row")`; R and C now
-   agree on every block. See `PERFORMANCE.md` §3.
+   agree on every block. See `PERFORMANCE.txt` §3.
 
 ## Benchmark
 
-See `bench/bench.sh`. Results are in `PERFORMANCE.md`.
+See `bench/bench.sh`. Results are in `PERFORMANCE.txt`.

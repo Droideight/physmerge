@@ -1,2 +1,12 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.RDataTmp
+^\.Rhistory$
+^cli$
+^sas$
+^tests/qa$
+^User Manual\.Rmd$
+^User-Manual\.html$
+^TECHNICAL_SPEC\.txt$
+^obsolete$
+^paper$
