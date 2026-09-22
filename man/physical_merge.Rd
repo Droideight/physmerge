@@ -32,9 +32,9 @@ significant SNP is encountered inside the current block.
 \code{"any"}: steps reset whenever any significant SNP is encountered,
 equivalent to the union-of-intervals logic used by locusDefiner.}
 
-\item{chrom_col}{Name of the chromosome column in \code{data}.  If
+\item{chrom_col}{Name of the chromosome column in \code{data}. If
 \code{NULL} (default), the function auto-detects a column named
-\code{"CHROM"}.  When a chromosome column is found and contains more
+\code{"CHROM"}. When a chromosome column is found and contains more
 than one unique value, the algorithm runs per chromosome.}
 }
 \value{
@@ -53,13 +53,13 @@ The returned data frame additionally carries an attribute
 \code{"rps_row"}: the row index in \code{data} of each representative SNP.
 \code{\link{annotate_blocks}} uses it to recover the exact input row, which
 is the only reliable way to label a block when several variants share one
-base-pair position (multi-allelic sites).  The attribute is not a column and
+base-pair position (multi-allelic sites). The attribute is not a column and
 does not change the visible output.
 }
 \description{
 Scans a position-sorted genomic data frame and collapses nearby significant
 signals into non-overlapping locus blocks using a forward sliding-window
-approach.  No LD reference panel is required.
+approach. No LD reference panel is required.
 }
 \details{
 The algorithm works in three passes:
@@ -67,15 +67,15 @@ The algorithm works in three passes:
 \enumerate{
 \item \strong{Forward scan}: opens a block when a significant SNP is
 encountered and keeps it alive as long as the window has not been
-exhausted.  The behaviour when a significant (but not necessarily more
+exhausted. The behaviour when a significant (but not necessarily more
 significant) SNP is found inside the block is controlled by
 \code{reset_on}:
 \describe{
 \item{\code{"best"} (default)}{Steps reset only when a \emph{more}
-significant SNP is found.  The representative SNP is always the
+significant SNP is found. The representative SNP is always the
 local maximum.}
 \item{\code{"any"}}{Steps reset whenever \emph{any} significant SNP
-is found, regardless of its value.  This is equivalent to taking
+is found, regardless of its value. This is equivalent to taking
 the union of \eqn{\pm}\code{window} intervals around every
 significant SNP (i.e. locusDefiner-style logic).}
 }
@@ -93,13 +93,13 @@ chromosome to prevent cross-boundary merges.
 }
 \examples{
 df <- data.frame(
-  position = c(100, 200, 350, 5000, 5100, 5200, 9000),
-  value    = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
+position = c(100, 200, 350, 5000, 5100, 5200, 9000),
+value = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 )
 # default: reset only on more significant SNP
 physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
 
 # locusDefiner-equivalent: reset on any significant SNP
 physical_merge(df, sig_th = 0.05, window = 500, reward = "min",
-               reset_on = "any")
+reset_on = "any")
 }

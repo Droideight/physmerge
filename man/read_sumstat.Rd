@@ -23,33 +23,33 @@ read_sumstat(
 
 \item{format}{One of \code{"plink2"}, \code{"gpcm"}, or \code{"custom"}.
 \describe{
-\item{\code{"plink2"}}{PLINK2 \code{.glm.*} output.  Default columns:
+\item{\code{"plink2"}}{PLINK2 \code{.glm.*} output. Default columns:
 \code{#CHROM}, \code{POS}, \code{ID}, \code{P}.}
-\item{\code{"gpcm"}}{REML-GPCM per-SNP output.  Default columns:
+\item{\code{"gpcm"}}{REML-GPCM per-SNP output. Default columns:
 \code{#CHROM}, \code{POS}, \code{ID}, \code{P_HPI}.}
 \item{\code{"custom"}}{Specify all column names manually via
 \code{chrom_col}, \code{pos_col}, \code{id_col}, \code{value_col}.}
 }}
 
 \item{value_col}{Name of the column to use as the "value" when merging.
-Overrides the format default when supplied.  Common choices: \code{"P"},
+Overrides the format default when supplied. Common choices: \code{"P"},
 \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.}
 
-\item{chrom_col}{Chromosome column name.  Overrides format default.}
+\item{chrom_col}{Chromosome column name. Overrides format default.}
 
-\item{pos_col}{Position column name.  Overrides format default.}
+\item{pos_col}{Position column name. Overrides format default.}
 
-\item{id_col}{SNP ID column name.  Overrides format default.
+\item{id_col}{SNP ID column name. Overrides format default.
 Set to \code{NA} if no ID column exists.}
 
-\item{test_filter}{Logical.  If \code{TRUE} (default for
+\item{test_filter}{Logical. If \code{TRUE} (default for
 \code{format = "plink2"}), filter rows by \code{test_col == test_val}
-before returning.  Useful for multi-covariate PLINK2 output where each
+before returning. Useful for multi-covariate PLINK2 output where each
 SNP appears once per TEST value.}
 
-\item{test_col}{Name of the TEST column.  Default \code{"TEST"}.}
+\item{test_col}{Name of the TEST column. Default \code{"TEST"}.}
 
-\item{test_val}{Value to retain in \code{test_col}.  Default \code{"ADD"}.}
+\item{test_val}{Value to retain in \code{test_col}. Default \code{"ADD"}.}
 
 \item{chrom}{Optional character/integer vector of chromosomes to retain.
 \code{NULL} (default) keeps all.}
@@ -70,7 +70,7 @@ test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
 }
 \description{
 A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP
-output, and arbitrary tabular formats.  Uses \code{data.table::fread} for
+output, and arbitrary tabular formats. Uses \code{data.table::fread} for
 fast, separator-agnostic reading.
 }
 \examples{
@@ -78,16 +78,16 @@ fast, separator-agnostic reading.
 # PLINK2 sumstats (TEST filter auto-enabled)
 out <- read_sumstat("my_gwas.glm.linear", format = "plink2")
 blocks <- physical_merge(out$data, sig_th = 5e-8, window = 500000,
-                         reward = out$reward)
+reward = out$reward)
 blocks <- annotate_blocks(blocks, out$data)
 
 # REML-GPCM output
 out <- read_sumstat("stage1_ch1_P_HPI.csv", format = "gpcm",
-                    value_col = "P_HPI", chrom = 1)
+value_col = "P_HPI", chrom = 1)
 
 # Custom format
 out <- read_sumstat("results.txt", format = "custom",
-                    chrom_col = "CHR", pos_col = "BP",
-                    id_col = "SNP", value_col = "P")
+chrom_col = "CHR", pos_col = "BP",
+id_col = "SNP", value_col = "P")
 }
 }

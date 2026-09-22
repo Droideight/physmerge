@@ -1,40 +1,40 @@
 #' Annotate merged blocks with full rows from the original input
 #'
 #' Returns one row per block containing all original columns for the
-#' representative SNP.  When \code{blocks} still carries the \code{"rps_row"}
+#' representative SNP. When \code{blocks} still carries the \code{"rps_row"}
 #' attribute set by \code{\link{physical_merge}}, the representative row is
 #' taken directly by index, so blocks at multi-allelic sites are labelled with
-#' the variant that actually led the block.  Otherwise the function falls back
+#' the variant that actually led the block. Otherwise the function falls back
 #' to joining on \code{CHROM} and \code{rps_BP}, which can only keep the first
-#' row at a duplicated position.  Block metadata columns (\code{serial},
+#' row at a duplicated position. Block metadata columns (\code{serial},
 #' \code{start}, \code{end}, \code{rps_BP}, \code{rps_value}) can be
 #' individually included or dropped.
 #'
-#' @param blocks    Data frame returned by \code{\link{physical_merge}}.
-#' @param data      The original input data frame passed to
-#'   the \code{data} element returned by \code{\link{read_sumstat}}.  Must contain a \code{position} column.
-#' @param chrom_col Name of the chromosome column in \code{data}.  If
-#'   \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.
-#' @param id_col    Name of the SNP ID column in \code{data} used to populate
-#'   \code{rps_ID}.  If \code{NULL} (default), auto-detects \code{"ID"} then
-#'   \code{"SNP"}.  Set to \code{NA} to skip.
-#' @param keep_serial    Logical. Include \code{serial} column. Default \code{TRUE}.
-#' @param keep_start     Logical. Include \code{start} column. Default \code{TRUE}.
-#' @param keep_end       Logical. Include \code{end} column. Default \code{TRUE}.
-#' @param keep_rps_BP    Logical. Include \code{rps_BP} column. Default \code{TRUE}.
+#' @param blocks Data frame returned by \code{\link{physical_merge}}.
+#' @param data The original input data frame passed to
+#' the \code{data} element returned by \code{\link{read_sumstat}}. Must contain a \code{position} column.
+#' @param chrom_col Name of the chromosome column in \code{data}. If
+#' \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.
+#' @param id_col Name of the SNP ID column in \code{data} used to populate
+#' \code{rps_ID}. If \code{NULL} (default), auto-detects \code{"ID"} then
+#' \code{"SNP"}. Set to \code{NA} to skip.
+#' @param keep_serial Logical. Include \code{serial} column. Default \code{TRUE}.
+#' @param keep_start Logical. Include \code{start} column. Default \code{TRUE}.
+#' @param keep_end Logical. Include \code{end} column. Default \code{TRUE}.
+#' @param keep_rps_BP Logical. Include \code{rps_BP} column. Default \code{TRUE}.
 #' @param keep_rps_value Logical. Include \code{rps_value} column. Default \code{TRUE}.
-#' @param keep_rps_ID    Logical. Include \code{rps_ID} column (when available).
-#'   Default \code{TRUE}.
+#' @param keep_rps_ID Logical. Include \code{rps_ID} column (when available).
+#' Default \code{TRUE}.
 #'
 #' @return The \code{blocks} data frame merged with full original columns for
-#'   each representative SNP row, with block metadata columns selectively
-#'   retained based on \code{keep_*} arguments.
+#' each representative SNP row, with block metadata columns selectively
+#' retained based on \code{keep_*} arguments.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' df     <- read_sumstat("my_gwas.glm.linear", format = "plink2")
+#' df <- read_sumstat("my_gwas.glm.linear", format = "plink2")
 #' blocks <- physical_merge(df$data, sig_th = 5e-8, window = 500000)
 #'
 #' # Keep all block metadata (default)
@@ -42,7 +42,7 @@
 #'
 #' # Drop start/end/rps_value — only keep serial, rps_BP, rps_ID + original cols
 #' annotate_blocks(blocks, df$data,
-#'                 keep_start = FALSE, keep_end = FALSE, keep_rps_value = FALSE)
+#' keep_start = FALSE, keep_end = FALSE, keep_rps_value = FALSE)
 #' }
 annotate_blocks <- function(blocks, data,
                             chrom_col = NULL,
@@ -162,22 +162,22 @@ annotate_blocks <- function(blocks, data,
 #' Export a SNP ID list from merged blocks
 #'
 #' Writes the representative SNP IDs to one or more plain-text files (one ID
-#' per line).  When \code{by_chrom = TRUE}, a separate file is written for
+#' per line). When \code{by_chrom = TRUE}, a separate file is written for
 #' each chromosome and bundled into a ZIP archive.
 #'
-#' @param blocks   Data frame returned by \code{\link{annotate_blocks}}.
-#'   Should contain \code{rps_ID} (added by \code{annotate_blocks}) or at
-#'   least \code{rps_BP}.
-#' @param path     Output file path.
-#'   \itemize{
-#'     \item \code{by_chrom = FALSE}: path to a \code{.txt} file.
-#'     \item \code{by_chrom = TRUE}: path to a \code{.zip} archive.
-#'   }
-#' @param by_chrom Logical.  \code{FALSE} (default) writes a single merged
-#'   file; \code{TRUE} writes one file per chromosome bundled in a ZIP.
-#'   Requires a \code{CHROM} column in \code{blocks}.
-#' @param id_col   Name of the ID column to write.  Defaults to \code{"rps_ID"}
-#'   if present, otherwise \code{"rps_BP"}.
+#' @param blocks Data frame returned by \code{\link{annotate_blocks}}.
+#' Should contain \code{rps_ID} (added by \code{annotate_blocks}) or at
+#' least \code{rps_BP}.
+#' @param path Output file path.
+#' \itemize{
+#' \item \code{by_chrom = FALSE}: path to a \code{.txt} file.
+#' \item \code{by_chrom = TRUE}: path to a \code{.zip} archive.
+#' }
+#' @param by_chrom Logical. \code{FALSE} (default) writes a single merged
+#' file; \code{TRUE} writes one file per chromosome bundled in a ZIP.
+#' Requires a \code{CHROM} column in \code{blocks}.
+#' @param id_col Name of the ID column to write. Defaults to \code{"rps_ID"}
+#' if present, otherwise \code{"rps_BP"}.
 #'
 #' @return Invisibly returns \code{path}.
 #'

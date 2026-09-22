@@ -17,11 +17,11 @@ least \code{rps_BP}.}
 \item \code{by_chrom = TRUE}: path to a \code{.zip} archive.
 }}
 
-\item{by_chrom}{Logical.  \code{FALSE} (default) writes a single merged
+\item{by_chrom}{Logical. \code{FALSE} (default) writes a single merged
 file; \code{TRUE} writes one file per chromosome bundled in a ZIP.
 Requires a \code{CHROM} column in \code{blocks}.}
 
-\item{id_col}{Name of the ID column to write.  Defaults to \code{"rps_ID"}
+\item{id_col}{Name of the ID column to write. Defaults to \code{"rps_ID"}
 if present, otherwise \code{"rps_BP"}.}
 }
 \value{
@@ -29,7 +29,7 @@ Invisibly returns \code{path}.
 }
 \description{
 Writes the representative SNP IDs to one or more plain-text files (one ID
-per line).  When \code{by_chrom = TRUE}, a separate file is written for
+per line). When \code{by_chrom = TRUE}, a separate file is written for
 each chromosome and bundled into a ZIP archive.
 }
 \examples{
