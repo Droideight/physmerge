@@ -94,6 +94,10 @@ read_sumstat <- function(path,
   id_col      <- id_col      %||% defaults$id
   value_col   <- value_col   %||% defaults$value
   test_filter <- test_filter %||% defaults$test_filter
+
+  # "no ID column" is spelled NA everywhere below; format = "custom" has no
+  # default ID column, so NULL means the same thing and has to become NA here.
+  if (is.null(id_col)) id_col <- NA_character_
   
   if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
     stop("For format = 'custom', you must supply chrom_col, pos_col, and value_col.")
@@ -154,8 +158,19 @@ read_sumstat <- function(path,
   if (nrow(df) == 0L)
     stop("No usable rows after filtering.")
   
-  df <- df[order(df$position), ]
-  # ascending pos is needed for physical merge.
+  # Sort by chromosome, then position.  The chromosome key is the order of
+  # first appearance, matching the order physical_merge() walks, rather than
+  # alphabetical, so the two agree on which block is serial 1.  Sorting on
+  # position alone would interleave chromosomes: the blocks would still come
+  # out right, because physical_merge() re-sorts within each chromosome, but
+  # the frame written out here would be one the C tool rejects.
+  df <- if (chrom_col %in% names(df)) {
+    ch <- as.character(df[[chrom_col]])
+    df[order(match(ch, unique(ch)), df$position), ]
+  } else {
+    df[order(df$position), ]
+  }
+  # ascending pos within a chromosome is needed for physical merge.
   
   # ── Suggest reward direction ──────────────────────────────────────────────────
   stat_cols <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",

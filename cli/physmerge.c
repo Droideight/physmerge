@@ -162,18 +162,53 @@ static char *rd_line(Reader *r) {
 }
 
 /* ------------------------------------------------------------- line split */
-/* splits in place; fills fld[0..want-1] (NULL when the line is short) */
+/* Next separator at or after p.  When sep is a space the file is treated as
+   whitespace-delimited, the way fread() reads one, so a tab separates too. */
+static char *find_sep(char *p, char sep, int ws) {
+    if (!ws) return strchr(p, sep);
+    for (; *p; p++) if (*p == ' ' || *p == '\t') return p;
+    return NULL;
+}
+
+/* splits in place; fills fld[0..want-1] (NULL when the line is short).
+
+   Two details follow data.table::fread(), because the R reader and this tool
+   have to agree about what a file says:
+     - a field that starts with '"' runs to the matching quote, with "" standing
+       for one '"'.  Without this a quoted comma splits the row and the record
+       is silently dropped as unparseable.
+     - when sep is a space, a run of spaces or tabs counts as one separator,
+       and leading whitespace is skipped.  Without this a space-padded file has
+       every column shifted by one.
+   Unquoting only ever shortens a field, so it stays safe to do in place. */
 static int split_line(char *s, char sep, char **fld, int want) {
-    int k = 0;
+    int k = 0, ws = (sep == ' ');
     for (int i = 0; i < want; i++) fld[i] = NULL;
     char *p = s;
+    if (ws) while (*p == ' ' || *p == '\t') p++;
     for (;;) {
-        char *e = strchr(p, sep);
-        if (k < want) fld[k] = p;
+        char *val = p, *rest = p;
+        if (*p == '"') {
+            char *r = p + 1, *w = p;
+            val = w;
+            while (*r) {
+                if (*r == '"') {
+                    if (r[1] == '"') { *w++ = '"'; r += 2; continue; }
+                    r++;
+                    break;
+                }
+                *w++ = *r++;
+            }
+            rest = r;
+            *w = '\0';               /* w < r here, so this cannot clobber r */
+        }
+        char *e = find_sep(rest, sep, ws);
+        if (k < want) fld[k] = val;
         k++;
         if (!e) break;
         *e = '\0';
         p = e + 1;
+        if (ws) while (*p == ' ' || *p == '\t') p++;
     }
     return k;
 }
@@ -226,6 +261,8 @@ static void fmt_pos(char *dst, size_t n, double v) {
 
 static void emit(Core *c, Block *b) {
     char s1[64], s2[64], s3[64];
+    if (b->end < b->start) b->end = b->start;   /* start is clamped at 0; keep
+                                                   the interval from inverting */
     fmt_pos(s1, sizeof s1, b->start);
     fmt_pos(s2, sizeof s2, b->end);
     fmt_pos(s3, sizeof s3, b->rps_bp);
@@ -269,9 +306,14 @@ static void stage(Core *c, Block *b) {
 static void open_snpdir_file(Core *c) {
     if (!c->snpdir) return;
     if (c->snpf) fclose(c->snpf);
-    /* the chromosome comes from the input file, so keep it out of the path */
-    char safe[64]; size_t k = 0;
-    for (const char *q = sget(&c->chrom); *q && k + 1 < sizeof safe; q++)
+    /* the chromosome comes from the input file, so keep it out of the path.
+       Refuse a name too long for the buffer rather than truncating it, which
+       would let two contigs collide on one file name. */
+    const char *src = sget(&c->chrom);
+    char safe[256]; size_t k = 0;
+    if (strlen(src) + 1 > sizeof safe)
+        die("chromosome name is too long for a file name (%zu characters)", strlen(src));
+    for (const char *q = src; *q; q++)
         safe[k++] = (*q == '/' || *q == '\\' || *q == '.') ? '_' : *q;
     safe[k] = '\0';
     char path[4096];
@@ -480,6 +522,9 @@ int main(int argc, char **argv) {
     Reader rd; rd_open(&rd, in_path);
     char *hdr = rd_line(&rd);
     if (!hdr) die("empty input file");
+    /* a UTF-8 BOM would otherwise become part of the first column's name */
+    if ((unsigned char)hdr[0] == 0xEF && (unsigned char)hdr[1] == 0xBB &&
+        (unsigned char)hdr[2] == 0xBF) hdr += 3;
     if (!sep) {
         if (strchr(hdr, '\t')) sep = '\t';
         else if (strchr(hdr, ',')) sep = ',';
@@ -553,6 +598,7 @@ int main(int argc, char **argv) {
     }
 
     unsigned long n_read = 0, n_kept = 0, n_test_drop = 0, n_chrom_drop = 0, n_na = 0;
+    int warned_neg = 0;
     char *linecopy = NULL; size_t linecopy_cap = 0;
 
     Rec *recs = NULL; size_t n_rec = 0, cap_rec = 0;
@@ -585,6 +631,11 @@ int main(int argc, char **argv) {
         }
         double pos, val;
         if (!parse_num(fld[i_pos], &pos) || !parse_num(fld[i_val], &val)) { n_na++; continue; }
+        if (pos < 0 && !warned_neg) {
+            warned_neg = 1;
+            if (!quiet) fprintf(stderr, "physmerge: warning: negative position(s) found; "
+                                        "block boundaries are clamped at 0.\n");
+        }
         const char *id = (i_id >= 0 && fld[i_id]) ? fld[i_id] : "";
         n_kept++;
 

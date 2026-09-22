@@ -12,7 +12,7 @@
 #'
 #' @param blocks    Data frame returned by \code{\link{physical_merge}}.
 #' @param data      The original input data frame passed to
-#'   \code{\link{read_sumstat$data}}.  Must contain a \code{position} column.
+#'   the \code{data} element returned by \code{\link{read_sumstat}}.  Must contain a \code{position} column.
 #' @param chrom_col Name of the chromosome column in \code{data}.  If
 #'   \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.
 #' @param id_col    Name of the SNP ID column in \code{data} used to populate
@@ -141,6 +141,18 @@ annotate_blocks <- function(blocks, data,
     merge_keys <- c("CHROM", "rps_BP")
   }
   out <- merge(blocks, repr, by = merge_keys, all.x = TRUE)
+
+  # Every block should have found its representative.  When none did, `data` is
+  # almost certainly not the frame these blocks were built from, and the result
+  # would otherwise be a silent table of NAs.
+  n_hit <- sum(out$rps_BP %in% repr$rps_BP)
+  if (n_hit == 0L)
+    warning("No block matched a row of `data`; the annotation columns are all ",
+            "NA.  Is this the data frame the blocks were built from?")
+  else if (n_hit < nrow(out))
+    warning(nrow(out) - n_hit, " of ", nrow(out),
+            " block(s) matched no row of `data`.")
+
   .finish_annotation(out, chrom_col, keep_serial, keep_start, keep_end,
                      keep_rps_BP, keep_rps_value, keep_rps_ID)
 }
@@ -159,12 +171,16 @@ annotate_blocks <- function(blocks, data,
     if (keep_rps_ID && "rps_ID" %in% names(out)) "rps_ID",
     if (keep_rps_value) "rps_value"
   )
-  meta <- unique(meta)
+  meta <- unique(as.character(meta))       # character(0), not NULL, when all
   rest <- setdiff(names(out), c(meta, "serial", "start", "end",
                                 "rps_BP", "rps_ID", "rps_value"))
-  out  <- out[, c(meta, rest), drop = FALSE]
+  keepcols <- c(meta, rest)
+  if (length(keepcols) == 0L)
+    stop("Every column was dropped; leave at least one keep_* argument TRUE.")
+  out  <- out[, keepcols, drop = FALSE]
   rownames(out) <- NULL
-  out[order(out$serial), ]
+  if ("serial" %in% names(out)) out <- out[order(out$serial), ]
+  out
 }
 
 
@@ -211,7 +227,12 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
   if (!id_col %in% names(blocks))
     stop("Column '", id_col, "' not found in blocks.")
   
-  ids <- as.character(blocks[[id_col]])
+  # as.character(900000) is "9e+05", which PLINK --extract cannot read.  Format
+  # a numeric id -- rps_BP, when the blocks carry no rps_ID -- in full.
+  ids <- if (is.numeric(blocks[[id_col]]))
+    format(blocks[[id_col]], scientific = FALSE, trim = TRUE)
+  else
+    as.character(blocks[[id_col]])
   
   if (!by_chrom) {
     writeLines(ids, path)
@@ -221,23 +242,40 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
     if (!"CHROM" %in% names(blocks))
       stop("by_chrom = TRUE requires a 'CHROM' column in blocks.")
     
-    path    <- normalizePath(path, mustWork = FALSE)  # fix relative path before setwd
+    old_wd <- getwd()
+    # normalizePath() returns a path that does not exist yet unchanged, and the
+    # zip is written after a setwd() into the temp directory -- so a relative
+    # path used to land inside that directory and be deleted with it, while the
+    # success message still printed.  Anchor it to the caller's directory.
+    if (!grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", path))
+      path <- file.path(old_wd, path)
+    path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+    
     tmp_dir <- tempfile(pattern = "physmerge_export_")
     dir.create(tmp_dir)
-    old_wd <- getwd()
     on.exit({
       setwd(old_wd)                        # restore wd even if zip fails
       unlink(tmp_dir, recursive = TRUE)    # then clean up tmp dir
     }, add = FALSE)
     
     chroms <- sort(unique(as.character(blocks$CHROM)))
-    for (ch in chroms) {
-      ch_ids  <- ids[as.character(blocks$CHROM) == ch]
-      writeLines(ch_ids, file.path(tmp_dir, paste0("snp_ch", ch, ".txt")))
+    # the chromosome comes from the input file, so keep it out of the path;
+    # cli/physmerge.c sanitizes the same three characters
+    safe   <- gsub("[/\\\\.]", "_", chroms)
+    if (anyDuplicated(safe))
+      stop("Chromosome names collide once made safe for a file name: ",
+           paste(unique(chroms[duplicated(safe) | duplicated(safe, fromLast = TRUE)]),
+                 collapse = ", "))
+    
+    for (i in seq_along(chroms)) {
+      ch_ids <- ids[as.character(blocks$CHROM) == chroms[i]]
+      writeLines(ch_ids, file.path(tmp_dir, paste0("snp_ch", safe[i], ".txt")))
     }
     
     setwd(tmp_dir)
-    utils::zip(path, files = list.files(tmp_dir), flags = "-j")
+    ok <- utils::zip(path, files = list.files(tmp_dir), flags = "-j")
+    if (!identical(as.integer(ok), 0L) || !file.exists(path))
+      stop("Failed to write the zip archive to ", path)
     
     message("Wrote ", length(chroms), " chromosome file(s) to ", path)
   }

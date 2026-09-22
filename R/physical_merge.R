@@ -108,7 +108,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     stop("Both 'position' and 'value' columns must be numeric.")
   if (!reward %in% c("min", "max"))
     stop("`reward` must be either 'min' or 'max'.")
-  if (length(sig_th) != 1L || !is.numeric(sig_th))
+  if (length(sig_th) != 1L || !is.numeric(sig_th) || is.na(sig_th))
     stop("`sig_th` must be a single numeric value.")
   if (length(window) != 1L || !is.numeric(window) || window <= 0)
     stop("`window` must be a single positive numeric value.")
@@ -126,6 +126,36 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     NULL
   }
   
+  # ── Drop unusable rows ───────────────────────────────────────────────────────
+  # A comparison against NA is NA, and `if (NA)` is an error, so a single NA in
+  # `value` used to abort the whole run with "missing value where TRUE/FALSE
+  # needed".  An NA in the chromosome column was worse: `which(chrom == ch)`
+  # quietly discarded the row, so a genome-wide significant SNP could vanish
+  # without a word.  Both are now dropped explicitly and counted, matching
+  # read_sumstat(), cli/physmerge.c and sas/physmerge.sas.
+  keep <- !is.na(data$position) & !is.na(data$value)
+  if (!is.null(resolved_chrom)) keep <- keep & !is.na(data[[resolved_chrom]])
+  if (any(!keep)) {
+    message(sum(!keep), " row(s) dropped (NA in position, value",
+            if (!is.null(resolved_chrom)) " or chromosome", ").")
+    data <- data[keep, , drop = FALSE]
+  }
+  orig_idx <- which(keep)   # row of the caller's `data` for each kept row
+
+  if (nrow(data) == 0L) {
+    empty <- data.frame(serial = integer(0), start = numeric(0), end = numeric(0),
+                        rps_BP = numeric(0), rps_value = numeric(0),
+                        rps_row = integer(0))
+    if (!is.null(resolved_chrom))
+      empty <- cbind(empty[, "serial", drop = FALSE], CHROM = character(0),
+                     empty[, setdiff(names(empty), "serial"), drop = FALSE])
+    return(.stash_rps_row(empty))
+  }
+
+  if (any(data$position < 0))
+    warning("Negative position(s) found.  Block boundaries are clamped at 0, ",
+            "so a block that starts below 0 has no width.")
+
   if (!is.null(resolved_chrom)) {
     chroms <- unique(data[[resolved_chrom]])
     if (length(chroms) > 1L) {
@@ -149,10 +179,10 @@ physical_merge <- function(data, sig_th, window, reward = "min",
       rownames(out) <- NULL
       col_order     <- c("serial", "CHROM",
                          setdiff(names(out), c("serial", "CHROM")))
-      return(.stash_rps_row(out[, col_order]))
+      return(.stash_rps_row(.remap_rps_row(out[, col_order], orig_idx)))
     }
   } else {
-    pos_range <- diff(range(data$position, na.rm = TRUE))
+    pos_range <- diff(range(data$position))
     if (pos_range > 2.5e8)
       warning("Position range > 250 Mb detected but no chromosome column found. ",
               "If data spans multiple chromosomes, SNPs near chromosome ",
@@ -160,7 +190,17 @@ physical_merge <- function(data, sig_th, window, reward = "min",
               "Add a CHROM column or filter to one chromosome at a time.")
   }
   
-  .stash_rps_row(.physical_merge_single(data, sig_th, window, reward, reset_on))
+  .stash_rps_row(.remap_rps_row(
+    .physical_merge_single(data, sig_th, window, reward, reset_on), orig_idx))
+}
+
+
+# Internal: translate representative row indices from the filtered frame back
+# onto the frame the caller passed in, so annotate_blocks() still lines up.
+.remap_rps_row <- function(blk, idx) {
+  if (!is.null(blk$rps_row) && length(blk$rps_row))
+    blk$rps_row <- idx[blk$rps_row]
+  blk
 }
 
 
@@ -281,6 +321,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     }
   }
   
+  blk$end <- pmax(blk$end, blk$start)
   blk
 }
 
