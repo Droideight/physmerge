@@ -5,7 +5,9 @@ Authors@R: person("Pin", role = c("aut", "cre"), email = "your@email.com")
 Description: Collapses overlapping genomic signals into non-overlapping locus
     blocks using a forward sliding-window approach, without requiring an LD
     reference panel. Supports p-values and test statistics, REML-GPCM
-    per-SNP output, and standard PLINK2 summary statistics.
+    per-SNP output, and standard PLINK2 summary statistics. The repository
+    also carries a standalone C command-line tool and a Base SAS port that
+    return the same blocks.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

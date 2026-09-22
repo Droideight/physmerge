@@ -34,6 +34,8 @@
 
 另有一支獨立的 C99 執行檔 [cli/physmerge.c](cli/physmerge.c)，把上述四個函式合成單一指令，不需要 R。串流單次掃描，記憶體固定 2.4 MB。每個 R 參數都有對應 flag，對照表與已知差異見 [cli/README.md](cli/README.md)、效能與驗證見 [cli/PERFORMANCE.txt](cli/PERFORMANCE.txt)。
 
+第三個實作是 Base SAS 版 [sas/physmerge.sas](sas/physmerge.sas)：`%pm_read` / `%physmerge` / `%pm_annotate` / `%pm_export` 對應上表四個函式，第 4 節的 forward scan 與 collapse 各寫成一個 DATA step。SAS 專屬的兩個差異（missing value 在數值比較裡小於任何數字；`BEST32.` 讀不可靠 1e-300 以下的 p 值）見 [sas/README.md](sas/README.md)。尚未在 SAS 上執行過，[sas/physmerge_selftest.sas](sas/physmerge_selftest.sas) 用 R 產生的 13 組標準答案驗證。
+
 內部 helpers (非 exported)：
 - `.is_significant(val, sig_th, reward)` — 顯著性比較
 - `.is_more_significant(val, best, reward)` — 「更顯著」比較
