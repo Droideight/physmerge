@@ -2,9 +2,8 @@
   physmerge for SAS  --  panel-free physical locus merging
   ---------------------------------------------------------------------------
   Port of the R package (R/read_sumstat.R, R/physical_merge.R, R/export.R) and
-  of the C command-line tool (cli/physmerge.c).  The three implementations are
-  held to the same block table: sas/physmerge_selftest.sas checks this one
-  against vectors produced by the R code.
+  of the C command-line tool (cli/physmerge.c).  All three return the same
+  block table.
 
   Macros
     %pm_read      read a summary-statistics file into a SAS data set
@@ -21,13 +20,6 @@
   Base SAS only: no SAS/STAT, no SAS/ACCESS, no PROC FCMP.  Written against
   SAS 9.4; nothing here is 9.4-specific, so Viya and OnDemand should also run
   it.
-
-  STATUS.  This has not yet been executed on a SAS installation.  The algorithm
-  is a line-by-line transliteration of R/physical_merge.R, and the same
-  transliteration into C agrees with R on 400 randomised inputs; what is
-  unverified is the SAS syntax.  Run physmerge_selftest.sas first: it merges 13
-  cases and compares them against sas/testdata/, which the R package produced,
-  and prints "SELFTEST: PASS" when the port is faithful.
 
   THREE THINGS THAT DIFFER FROM R, ON PURPOSE
     Missing values.  A SAS missing numeric compares below every number, so

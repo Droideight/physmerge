@@ -15,9 +15,9 @@ Written by running `tests/qa/*` against physmerge 0.3.0 (R) and
 | `R CMD check` | 3 WARNINGs, 1 NOTE | **Status: OK** |
 | 2M SNPs, streaming | 0.12 s, 2.5 MB peak | **0.12 s, 2.5 MB peak** |
 
-The SAS reference vectors in `sas/testdata/` are byte-identical before and
-after the fixes. That is the check that none of this changed the algorithm's
-answer on well-formed input.
+The 400-case differential and the two validation scripts in `cli/` agree before
+and after. That is the check that none of this changed the algorithm's answer
+on well-formed input.
 
 ## What was already sound
 
@@ -48,7 +48,6 @@ rather than asserting.  Run them from the package root, after `make -C cli`.
                            fractional and negative positions, --no-chrom,
                            --chrom, --annotate-full, name collisions
   diff_c_vs_r.R            400 randomised inputs through both the C tool and R
-  gen_sas_vectors.R        regenerates sas/testdata/ from the R implementation
 
 ---
 
@@ -219,8 +218,7 @@ interval inverted. The C tool did the same thing.
 **Fixed in all three implementations**: `end` is clamped to at least `start`,
 and R and C each warn once when a negative position is seen. For non-negative
 positions the clamp is a no-op, because `max(0, rps - w)` is monotone in `rps`,
-so a trimmed `end` is never below its own `start`. That is why the SAS vectors
-did not move.
+so a trimmed `end` is never below its own `start`.
 
 ---
 
