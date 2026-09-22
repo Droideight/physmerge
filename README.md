@@ -21,11 +21,11 @@ about 2.4 MB (1.85 GB input, 2.4 MB resident).
 statistics. A block opens at the first significant SNP, with its start placed one
 window upstream (`max(0, position - window)`). The block carries a window-sized
 budget that is spent by the distance traveled and refilled to the full window at
-every significant SNP (`reset_on = "any"`); it stays open until the budget runs
-out, equivalently, until the next significant SNP lies one window or more beyond
-the previous one, at which point it closes one window downstream of the last
-significant SNP, mirroring its start. A new block opens upon the next significant
-SNP until the last position is visited.
+every significant SNP; it stays open until the budget runs out, equivalently, 
+until the next significant SNP lies one window or more beyond the previous one,
+at which point it closes one window downstream of the last significant 
+SNP, mirroring its start. A new block opens upon the next significant SNP until 
+the last position is visited.
 
 The representative of each block is its most significant SNP. The
 representatives of successive blocks are at least one window apart, but because
@@ -42,7 +42,7 @@ a chromosome column the algorithm runs per chromosome.
 ### R package
 
 ```r
-install.packages("devtools")           # if you do not have it
+install.packages("devtools")
 devtools::install_github("Droideight/physmerge")
 ```
 
@@ -95,16 +95,13 @@ physmerge --version
 
 ### SAS
 
-Nothing to build. Point `PMDIR` at the `sas` directory of a clone and include the
-file:
+Point `PMDIR` at the `sas` directory of a clone and include the file:
 
 ```sas
 %let PMDIR = /path/to/physmerge/sas;
 %include "&PMDIR/physmerge.sas";
 %pm_version;
 ```
-
-Base SAS is enough: no SAS/STAT, no SAS/ACCESS, no PROC FCMP.
 
 The header of `sas/physmerge.sas` has the macro reference and the SAS-specific
 traps worth knowing about: a missing value compares below every number, and
@@ -115,8 +112,7 @@ traps worth knowing about: a missing value compares below every number, and
 
 ## 2. Quick start
 
-The repository ships a small example file, so the commands below run without any
-data of your own. From the `cli` directory you were left in by the build:
+The repository ships a small example file. From the `cli` directory:
 
 ```bash
 cd example
@@ -160,9 +156,9 @@ And in SAS:
 
 ---
 
-## 3. Where the output goes
+## 3. Output destination
 
-**By default the block table is printed to the terminal (stdout)** and nothing is
+By default the block table is printed to the terminal (stdout) and nothing is
 written to disk. Progress messages go to stderr, so a redirect or a pipe carries
 the table only.
 
@@ -214,7 +210,7 @@ Blocks do not overlap; within a chromosome, `end[i] <= start[i+1]`.
 
 ## 4. Recipes
 
-**Standard PLINK2 `.glm.*` output.** The `plink2` format keeps only `TEST=ADD`
+Standard PLINK2 `.glm.*` output. The `plink2` format keeps only `TEST=ADD`
 rows and drops rows with a missing p-value, so no pre-filtering is needed:
 
 ```bash
@@ -223,7 +219,7 @@ physmerge --input gwas.glm.linear --format plink2 \
   --out blocks.tsv --snp-list lead_snps.txt
 ```
 
-**The value column is `-log10(P)` rather than `P`** (PLINK2 writes
+The value column is `-log10(P)` rather than `P` (PLINK2 writes
 `NEG_LOG10_P` for some runs). Point at the column, flip the direction, and
 convert the threshold (`-log10(5e-8) = 7.30103`):
 
@@ -233,7 +229,7 @@ physmerge --input gwas.glm.logistic.hybrid --format plink2 \
   --out blocks.tsv
 ```
 
-**Any other table**, space-, tab- or comma-separated; the separator is read from
+Any other table, space-, tab- or comma-separated; the separator is read from
 the header. Name the columns:
 
 ```bash
@@ -242,13 +238,13 @@ physmerge --input sumstats.txt --format custom \
   --sig-th 5e-8 --window 500000
 ```
 
-**Feed the lead SNPs straight into PLINK:**
+Feed the lead SNPs straight into PLINK:
 
 ```bash
 plink2 --pfile your_data --extract lead_snps.txt --make-pgen --out lead_only
 ```
 
-**Choosing a window.** A larger window merges more. Where significant SNPs are
+Choosing a window. A larger window merges more. Where significant SNPs are
 dense and never more than one window apart, `--window 500000 --reset-on any`
 chains the whole region into a single block; shrink the window for finer loci. In
 a chr22 HbA1c scan (1.25 million SNPs, 2,550 of them genome-wide significant),
@@ -291,7 +287,6 @@ merged wrongly; add `--sort` in that case.
 - `cli/PERFORMANCE.txt`: benchmarks, validation, and the known differences from
   the R package
 - `sas/physmerge.sas`: its header is the SAS reference
-- `TECHNICAL_SPEC.txt`: algorithm, data contract, edge cases (in Chinese)
 - `tests/qa/FINDINGS.txt`: the edge cases the three implementations were checked
   against, and the probes that found them
 
