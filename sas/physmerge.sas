@@ -11,7 +11,7 @@
     %let rc = %sysfunc(close(&dsid));
   %end;
   &t
-%mend pm_vtype;
+    %mend pm_vtype;
 
 %macro pm_col(ds, want);
   %local lib mem hit;
@@ -29,25 +29,24 @@
 
   proc sql noprint;
     select name into :hit trimmed from dictionary.columns
-     where libname = "&lib" and memname = "&mem"
-       and (upcase(label) = upcase(symget('pm__want'))
-         or upcase(name) = upcase(symget('pm__want'))
-
-         or upcase(name) = upcase(prxchange('s/[^A-Za-z0-9_]/_/', -1,
-                                             strip(symget('pm__want'))))
-         or upcase(name) = upcase(cats('_', prxchange('s/[^A-Za-z0-9_]/_/', -1,
-                                             strip(symget('pm__want'))))))
-     order by case when upcase(label) = upcase(symget('pm__want')) then 1
-                   when upcase(name) = upcase(symget('pm__want')) then 2
-                   else 3 end;
+      where libname = "&lib" and memname = "&mem"
+      and (upcase(label) = upcase(symget('pm__want'))
+      or upcase(name) = upcase(symget('pm__want'))
+      or upcase(name) = upcase(prxchange('s/[^A-Za-z0-9_]/_/', -1,
+      strip(symget('pm__want'))))
+      or upcase(name) = upcase(cats('_', prxchange('s/[^A-Za-z0-9_]/_/', -1,
+      strip(symget('pm__want'))))))
+      order by case when upcase(label) = upcase(symget('pm__want')) then 1
+      when upcase(name) = upcase(symget('pm__want')) then 2
+      else 3 end;
   quit;
   &hit
-%mend pm_col;
+    %mend pm_col;
 
 %macro pm_read(path=, out=pm_sumstat, format=plink2,
-               chrom_col=, pos_col=, id_col=, value_col=,
-               test_filter=, test_col=TEST, test_val=ADD, chrom=,
-               dlm='09'x, grows=MAX, quiet=0);
+  chrom_col=, pos_col=, id_col=, value_col=,
+  test_filter=, test_col=TEST, test_val=ADD, chrom=,
+  dlm='09'x, grows=MAX, quiet=0);
 
   %local fmt vc vp vv vi vt n0 n1 vvn;
   %let fmt = %upcase(&format);
@@ -162,7 +161,7 @@
   %let pm_id_var = &vi;
   %let pm_value_var = &vv;
   %if %index(%str( LOG10_P T_STAT Z_STAT CHISQ F_STAT T_STAT_DIRECT T_STAT_TE HPI ),
-             %str( )%upcase(&value_col)%str( )) %then %let pm_reward = max;
+    %str( )%upcase(&value_col)%str( )) %then %let pm_reward = max;
   %else %let pm_reward = min;
   %if &quiet = 0 %then
     %put NOTE: physmerge: suggested reward = &pm_reward for value column &value_col..;
@@ -179,10 +178,10 @@
     %let rc = %sysfunc(close(&dsid));
   %end;
   &n
-%mend pm_nobs;
+    %mend pm_nobs;
 
 %macro pm_prep(data=, out=_pm_prep, chrom=, pos=POSITION, value=VALUE, id=,
-               idlen=200, chromlen=32);
+  idlen=200, chromlen=32);
   data &out(keep=_cord _chrom _pos _val _id _seq);
     length _chrom $ &chromlen _id $ &idlen _cord 8;
     if _n_ = 1 then do;
@@ -213,9 +212,9 @@
 %mend pm_prep;
 
 %macro physmerge(data=, out=pm_blocks, sig_th=5e-8, window=500000,
-                 reward=min, reset_on=best,
-                 chrom=, pos=POSITION, value=VALUE, id=,
-                 idlen=200, chromlen=32, quiet=0);
+  reward=min, reset_on=best,
+  chrom=, pos=POSITION, value=VALUE, id=,
+  idlen=200, chromlen=32, quiet=0);
 
   %local c rw ro nin nout;
   %let rw = %upcase(&reward);
@@ -238,7 +237,7 @@
   %end;
 
   %pm_prep(data=&data, out=_pm_prep, chrom=&chrom, pos=&pos, value=&value,
-           id=&id, idlen=&idlen, chromlen=&chromlen);
+    id=&id, idlen=&idlen, chromlen=&chromlen);
   %let nin = %pm_nobs(_pm_prep);
 
   data _pm_raw(keep=_cord _chrom start end rps_BP rps_value rps_ID);
@@ -322,7 +321,7 @@
     length h_chrom $ &chromlen h_id $ &idlen;
     retain held h_chrom h_start h_end h_bp h_val h_id;
     set _pm_raw(rename=(_chrom=i_chrom start=i_start end=i_end
-                        rps_BP=i_bp rps_value=i_val rps_ID=i_id));
+      rps_BP=i_bp rps_value=i_val rps_ID=i_id));
     by _cord;
 
     if first._cord then held = 0;
@@ -354,7 +353,7 @@
 
   data &out(keep=serial CHROM start end rps_BP rps_ID rps_value);
     length serial 8 CHROM $ &chromlen start 8 end 8 rps_BP 8
-           rps_ID $ &idlen rps_value 8;
+      rps_ID $ &idlen rps_value 8;
     set _pm_col;
     serial + 1;
     CHROM = h_chrom;
@@ -374,16 +373,16 @@
 %mend physmerge;
 
 %macro pm_annotate(blocks=pm_blocks, data=, out=pm_blocks_annot,
-                   chrom=, pos=POSITION, id=, keep=);
+  chrom=, pos=POSITION, id=, keep=);
 
   %local addcols;
 
   proc sql noprint;
     select strip(name) into :addcols separated by ' '
       from dictionary.columns
-     where libname = 'WORK' and memname = %upcase("&data")
-       and upcase(name) not in ('POSITION', 'VALUE'
-            %if %length(&chrom) %then , %upcase("&chrom") ;
+      where libname = 'WORK' and memname = %upcase("&data")
+      and upcase(name) not in ('POSITION', 'VALUE'
+      %if %length(&chrom) %then , %upcase("&chrom") ;
             %if %length(&pos) %then , %upcase("&pos") ;
             %if %length(&id) %then , %upcase("&id") ; );
   quit;
@@ -391,18 +390,18 @@
 
   proc sql;
     create table &out as
-    select b.*
-           %if %length(&addcols) %then %do;
+      select b.*
+      %if %length(&addcols) %then %do;
              %local i col;
              %do i = 1 %to %sysfunc(countw(&addcols));
                %let col = %scan(&addcols, &i);
                , d.&col
-             %end;
+                 %end;
            %end;
       from &blocks as b
-      left join &data as d
+        left join &data as d
         on d.&pos = b.rps_BP
-           %if %length(&chrom) %then and cats(d.&chrom) = b.CHROM ;
+        %if %length(&chrom) %then and cats(d.&chrom) = b.CHROM ;
            %if %length(&id) %then and cats(d.&id) = b.rps_ID ;
      order by b.serial;
   quit;
