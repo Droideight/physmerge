@@ -18,8 +18,46 @@
     %pm_vtype     variable type, C or N
     %pm_prep      normalise / filter / sort an input data set
 
-  Tested with SAS 9.4 and SAS Viya.  Base SAS only: no SAS/STAT, no
-  SAS/ACCESS, no PROC FCMP.
+  Base SAS only: no SAS/STAT, no SAS/ACCESS, no PROC FCMP.  Written against
+  SAS 9.4; nothing here is 9.4-specific, so Viya and OnDemand should also run
+  it.
+
+  STATUS.  This has not yet been executed on a SAS installation.  The algorithm
+  is a line-by-line transliteration of R/physical_merge.R, and the same
+  transliteration into C agrees with R on 400 randomised inputs; what is
+  unverified is the SAS syntax.  Run physmerge_selftest.sas first: it merges 13
+  cases and compares them against sas/testdata/, which the R package produced,
+  and prints "SELFTEST: PASS" when the port is faithful.
+
+  THREE THINGS THAT DIFFER FROM R, ON PURPOSE
+    Missing values.  A SAS missing numeric compares below every number, so
+      `value < 5e-8` is TRUE for `.`.  %pm_read and %pm_prep drop rows with a
+      missing position or value before the scan.  Do not hand %physmerge a data
+      set you assembled without that filter.
+    Chromosome order.  Chromosomes are ranked by first appearance, not
+      alphabetically, so the block serial numbers match physical_merge(), which
+      walks unique(data$CHROM).  %pm_prep sorts by (rank, position, input row),
+      reproducing R's stable order().
+    Exported ids.  A numeric id is written with BEST32., so position 900000
+      comes out as 900000 rather than R's "9e+05", which PLINK cannot use.
+      %pm_export(by_chrom=1) writes plain snp_ch<CHR>.txt files into dir=; it
+      does not zip them, because Base SAS has no portable zip.
+
+  NUMERIC RANGE -- READ THIS BEFORE MERGING ON P-VALUES
+    The BEST32. informat does not read subnormals reliably, and on z/OS the
+    native floating-point format underflows around 1e-78.  GWAS p-values
+    routinely go below 1e-300.  A p-value that underflows to 0 is still
+    "significant", so the merge is usually still correct, but rps_value reads 0
+    and any downstream ranking on it breaks.  If your summary statistics reach
+    that range, merge on LOG10_P instead:
+
+      %physmerge(data=ss, out=blocks, value=LOG10_P,
+                 sig_th=7.3, reward=max, window=500000, ...);
+
+    -log10(5e-8) = 7.301.  This is the same advice read_sumstat() gives in R.
+
+  Compressed input.  %pm_read cannot read .gz; gunzip first, or use the C tool,
+  which reads gzip natively.
 ===========================================================================*/
 
 %macro pm_version;
