@@ -53,20 +53,19 @@ annotate_blocks <- function(blocks, data,
                             keep_rps_BP     = TRUE,
                             keep_rps_value  = TRUE,
                             keep_rps_ID     = TRUE) {
-  
+
   if (nrow(blocks) == 0L) return(blocks)
   if (!"position" %in% names(data))
     stop("`data` must contain a 'position' column.")
-  
+
   if (is.null(chrom_col))
     chrom_col <- if ("CHROM" %in% names(data)) "CHROM" else
       if ("#CHROM" %in% names(data)) "#CHROM" else NULL
-  # reading #CHROM is provided in case user did not use read_sumstat
-  
+
   if (is.null(id_col))
     id_col <- if ("ID" %in% names(data)) "ID" else
       if ("SNP" %in% names(data)) "SNP" else NA
-  
+
   rr <- attr(blocks, "rps_row")
   use_rr <- !is.null(rr) && length(rr) == nrow(blocks) && !anyNA(rr) &&
     all(rr >= 1L) && all(rr <= nrow(data)) &&
@@ -99,7 +98,6 @@ annotate_blocks <- function(blocks, data,
   } else {
     data_dedup <- data[!duplicated(data$position), ]
   }
-  # here, when multiple SNPs share one bp, only the first instance is kept
   if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(data_dedup)) {
     keys_block <- paste(blocks$CHROM, blocks$rps_BP, sep = ":")
     keys_data  <- paste(data_dedup[[chrom_col]], data_dedup$position, sep = ":")
@@ -107,21 +105,17 @@ annotate_blocks <- function(blocks, data,
   } else {
     repr <- data_dedup[data_dedup$position %in% blocks$rps_BP, ]
   }
-  # only keep rows that have representative SNPs
   repr$rps_BP     <- repr$position
-  
-  # Add rps_ID if available
+
   has_id <- !is.na(id_col) && id_col %in% names(repr)
   if (has_id) repr$rps_ID <- repr[[id_col]]
-  
-  # Columns to bring in from original data
+
   join_cols <- c("rps_BP",
                  if (!is.null(chrom_col) && chrom_col %in% names(repr)) chrom_col,
                  if (has_id) "rps_ID")
   extra     <- setdiff(names(repr), c(join_cols, "position", "value", id_col))
   repr      <- repr[, c(join_cols, extra), drop = FALSE]
-  
-  # Merge
+
   merge_keys <- "rps_BP"
   if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(repr)) {
     if (chrom_col != "CHROM") names(repr)[names(repr) == chrom_col] <- "CHROM"
@@ -165,9 +159,6 @@ annotate_blocks <- function(blocks, data,
   out
 }
 
-
-# ==============================================================================
-
 #' Export a SNP ID list from merged blocks
 #'
 #' Writes the representative SNP IDs to one or more plain-text files (one ID
@@ -198,12 +189,12 @@ annotate_blocks <- function(blocks, data,
 #' export_snp_list(blocks, "snp_ids_by_chr.zip", by_chrom = TRUE)
 #' }
 export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
-  
+
   if (nrow(blocks) == 0L) {
     warning("No blocks to export.")
     return(invisible(path))
   }
-  
+
   if (is.null(id_col))
     id_col <- if ("rps_ID" %in% names(blocks)) "rps_ID" else "rps_BP"
   if (!id_col %in% names(blocks))
@@ -213,46 +204,46 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
     format(blocks[[id_col]], scientific = FALSE, trim = TRUE)
   else
     as.character(blocks[[id_col]])
-  
+
   if (!by_chrom) {
     writeLines(ids, path)
     message("Wrote ", length(ids), " IDs to ", path)
-    
+
   } else {
     if (!"CHROM" %in% names(blocks))
       stop("by_chrom = TRUE requires a 'CHROM' column in blocks.")
-    
+
     old_wd <- getwd()
     if (!grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", path))
       path <- file.path(old_wd, path)
     path <- normalizePath(path, winslash = "/", mustWork = FALSE)
-    
+
     tmp_dir <- tempfile(pattern = "physmerge_export_")
     dir.create(tmp_dir)
     on.exit({
       setwd(old_wd)
       unlink(tmp_dir, recursive = TRUE)
     }, add = FALSE)
-    
+
     chroms <- sort(unique(as.character(blocks$CHROM)))
     safe   <- gsub("[/\\\\.]", "_", chroms)
     if (anyDuplicated(safe))
       stop("Chromosome names collide once made safe for a file name: ",
            paste(unique(chroms[duplicated(safe) | duplicated(safe, fromLast = TRUE)]),
                  collapse = ", "))
-    
+
     for (i in seq_along(chroms)) {
       ch_ids <- ids[as.character(blocks$CHROM) == chroms[i]]
       writeLines(ch_ids, file.path(tmp_dir, paste0("snp_ch", safe[i], ".txt")))
     }
-    
+
     setwd(tmp_dir)
     ok <- utils::zip(path, files = list.files(tmp_dir), flags = "-j")
     if (!identical(as.integer(ok), 0L) || !file.exists(path))
       stop("Failed to write the zip archive to ", path)
-    
+
     message("Wrote ", length(chroms), " chromosome file(s) to ", path)
   }
-  
+
   invisible(path)
 }

@@ -1,5 +1,3 @@
-# Internal helpers
-
 .is_significant <- function(val, sig_th, reward) {
   if (reward == "min") val < sig_th else val > sig_th
 }
@@ -7,9 +5,6 @@
 .is_more_significant <- function(val, best, reward) {
   if (reward == "min") val < best else val > best
 }
-
-
-# ==============================================================================
 
 #' Physical locus merging
 #'
@@ -98,8 +93,7 @@
 #'                reset_on = "any")
 physical_merge <- function(data, sig_th, window, reward = "min",
                            reset_on = "best", chrom_col = NULL) {
-  
-  # ── Input validation ─────────────────────────────────────────────────────────
+
   if (!is.data.frame(data))
     stop("`data` must be a data frame.")
   if (!all(c("position", "value") %in% names(data)))
@@ -114,8 +108,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     stop("`window` must be a single positive numeric value.")
   if (!reset_on %in% c("best", "any"))
     stop("`reset_on` must be either 'best' or 'any'.")
-  
-  # ── Per-chromosome dispatch ───────────────────────────────────────────────────
+
   resolved_chrom <- if (!is.null(chrom_col)) {
     if (!chrom_col %in% names(data))
       stop("chrom_col '", chrom_col, "' not found in data.")
@@ -125,8 +118,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   } else {
     NULL
   }
-  
-  # ── Drop unusable rows ───────────────────────────────────────────────────────
+
   keep <- !is.na(data$position) & !is.na(data$value)
   if (!is.null(resolved_chrom)) keep <- keep & !is.na(data[[resolved_chrom]])
   if (any(!keep)) {
@@ -183,11 +175,10 @@ physical_merge <- function(data, sig_th, window, reward = "min",
               "boundaries may be incorrectly merged into the same block. ",
               "Add a CHROM column or filter to one chromosome at a time.")
   }
-  
+
   .stash_rps_row(.remap_rps_row(
     .physical_merge_single(data, sig_th, window, reward, reset_on), orig_idx))
 }
-
 
 .remap_rps_row <- function(blk, idx) {
   if (!is.null(blk$rps_row) && length(blk$rps_row))
@@ -203,27 +194,27 @@ physical_merge <- function(data, sig_th, window, reward = "min",
 }
 
 .physical_merge_single <- function(data, sig_th, window, reward, reset_on) {
-  
+
   ord  <- order(data$position)
   data <- data[ord, ]
   n    <- nrow(data)
-  
+
   empty_out <- data.frame(
     serial    = integer(0), start = numeric(0), end   = numeric(0),
     rps_BP    = numeric(0), rps_value = numeric(0), rps_row = integer(0)
   )
   if (n == 0L) return(empty_out)
-  
+
   out_serial  <- integer(n);  out_start   <- numeric(n)
   out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
   out_rps_val <- numeric(n);  out_rps_row <- integer(n)
   block_count <- 0L
-  
+
   in_block       <- FALSE
   steps          <- window
   sig_this_block <- sig_th
   last_pos       <- data$position[1L]
-  
+
   open_block <- function(pos, val, i) {
     block_count <<- block_count + 1L
     out_serial[block_count]  <<- block_count
@@ -236,33 +227,32 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     steps          <<- window
     sig_this_block <<- val
   }
-  
+
   close_block <- function(last_inblock_pos) {
     out_end[block_count] <<- last_inblock_pos + steps
     in_block             <<- FALSE
     steps                <<- window
     sig_this_block       <<- sig_th
   }
-  
+
   for (i in seq_len(n)) {
     pos <- data$position[i]
     val <- data$value[i]
-    
+
     if (!in_block) {
       if (.is_significant(val, sig_th, reward)) open_block(pos, val, i)
-      
+
     } else {
       remaining <- steps - (pos - last_pos)
-      
+
       if (remaining <= 0) {
         close_block(last_pos)
         if (.is_significant(val, sig_th, reward)) open_block(pos, val, i)
-        
+
       } else {
         steps <- remaining
-        
+
         if (reset_on == "any" && .is_significant(val, sig_th, reward)) {
-          # Update representative only if this SNP is also more significant.
           steps <- window
           if (.is_more_significant(val, sig_this_block, reward)) {
             sig_this_block           <- val
@@ -270,9 +260,8 @@ physical_merge <- function(data, sig_th, window, reward = "min",
             out_rps_val[block_count] <- val
             out_rps_row[block_count] <- ord[i]
           }
-          
+
         } else if (.is_more_significant(val, sig_this_block, reward)) {
-          # reset_on == "best": reset only on improvement
           sig_this_block           <- val
           steps                    <- window
           out_rps_bp[block_count]  <- pos
@@ -285,7 +274,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   }
   if (in_block) close_block(last_pos)
   if (block_count == 0L) return(empty_out)
-  
+
   raw_blocks <- data.frame(
     serial    = out_serial[seq_len(block_count)],
     start     = out_start[seq_len(block_count)],
@@ -295,16 +284,16 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     rps_row   = out_rps_row[seq_len(block_count)],
     stringsAsFactors = FALSE
   )
-  
+
   blk <- .collapse_blocks(raw_blocks, window, reward)
-  
+
   if (nrow(blk) > 1L) {
     for (i in seq_len(nrow(blk) - 1L)) {
       if (blk$end[i] > blk$start[i + 1L])
         blk$end[i] <- blk$start[i + 1L]
     }
   }
-  
+
   blk$end <- pmax(blk$end, blk$start)
   blk
 }

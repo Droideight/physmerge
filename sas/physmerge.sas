@@ -1,65 +1,7 @@
-/*===========================================================================
-  physmerge for SAS  --  panel-free physical locus merging
-  ---------------------------------------------------------------------------
-  Port of the R package (R/read_sumstat.R, R/physical_merge.R, R/export.R) and
-  of the C command-line tool (cli/physmerge.c).  All three return the same
-  block table.
-
-  Macros
-    %pm_read      read a summary-statistics file into a SAS data set
-    %physmerge    forward sliding-window merge  -> block table
-    %pm_annotate  attach the lead SNP's original columns to the block table
-    %pm_export    write representative SNP ids, one file or one file per chrom
-    %pm_version   print the version
-
-  Helpers (called by the above, usable on their own)
-    %pm_col       resolve a file header name to its SAS variable name
-    %pm_vtype     variable type, C or N
-    %pm_prep      normalise / filter / sort an input data set
-
-  Base SAS only: no SAS/STAT, no SAS/ACCESS, no PROC FCMP.  Written against
-  SAS 9.4; nothing here is 9.4-specific, so Viya and OnDemand should also run
-  it.
-
-  THREE THINGS THAT DIFFER FROM R, ON PURPOSE
-    Missing values.  A SAS missing numeric compares below every number, so
-      `value < 5e-8` is TRUE for `.`.  %pm_read and %pm_prep drop rows with a
-      missing position or value before the scan.  Do not hand %physmerge a data
-      set you assembled without that filter.
-    Chromosome order.  Chromosomes are ranked by first appearance, not
-      alphabetically, so the block serial numbers match physical_merge(), which
-      walks unique(data$CHROM).  %pm_prep sorts by (rank, position, input row),
-      reproducing R's stable order().
-    Exported ids.  A numeric id is written with BEST32., so position 900000
-      comes out as 900000 rather than R's "9e+05", which PLINK cannot use.
-      %pm_export(by_chrom=1) writes plain snp_ch<CHR>.txt files into dir=; it
-      does not zip them, because Base SAS has no portable zip.
-
-  NUMERIC RANGE -- READ THIS BEFORE MERGING ON P-VALUES
-    The BEST32. informat does not read subnormals reliably, and on z/OS the
-    native floating-point format underflows around 1e-78.  GWAS p-values
-    routinely go below 1e-300.  A p-value that underflows to 0 is still
-    "significant", so the merge is usually still correct, but rps_value reads 0
-    and any downstream ranking on it breaks.  If your summary statistics reach
-    that range, merge on LOG10_P instead:
-
-      %physmerge(data=ss, out=blocks, value=LOG10_P,
-                 sig_th=7.3, reward=max, window=500000, ...);
-
-    -log10(5e-8) = 7.301.  This is the same advice read_sumstat() gives in R.
-
-  Compressed input.  %pm_read cannot read .gz; gunzip first, or use the C tool,
-  which reads gzip natively.
-===========================================================================*/
-
 %macro pm_version;
   %put NOTE: physmerge for SAS 0.3.0 (sas-1), matching physmerge R 0.3.0.;
 %mend pm_version;
 
-
-/*---------------------------------------------------------------------------
-  %pm_vtype(ds, var) -> C or N (empty if the variable does not exist)
----------------------------------------------------------------------------*/
 %macro pm_vtype(ds, var);
   %local dsid vnum t rc;
   %let dsid = %sysfunc(open(&ds));
@@ -71,15 +13,6 @@
   &t
 %mend pm_vtype;
 
-
-/*---------------------------------------------------------------------------
-  %pm_col(ds, want) -> the SAS variable holding the file column named `want`.
-
-  PROC IMPORT under VALIDVARNAME=V7 rewrites a header such as "#CHROM" to the
-  variable _CHROM and keeps "#CHROM" as the label.  This looks at the label
-  first, then the name, then the V7 rewrite of `want`, so both spellings work.
-  Returns empty when nothing matches.
----------------------------------------------------------------------------*/
 %macro pm_col(ds, want);
   %local lib mem hit;
   %if %index(&ds, .) %then %do;
@@ -99,9 +32,7 @@
      where libname = "&lib" and memname = "&mem"
        and (upcase(label) = upcase(symget('pm__want'))
          or upcase(name)  = upcase(symget('pm__want'))
-         /* PROC IMPORT under VALIDVARNAME=V7 rewrites every character that is
-            not A-Z 0-9 _ to _, and prefixes _ when the result does not start
-            with a letter or _ : "#CHROM" becomes _CHROM */
+
          or upcase(name)  = upcase(prxchange('s/[^A-Za-z0-9_]/_/', -1,
                                              strip(symget('pm__want'))))
          or upcase(name)  = upcase(cats('_', prxchange('s/[^A-Za-z0-9_]/_/', -1,
@@ -113,28 +44,6 @@
   &hit
 %mend pm_col;
 
-
-/*---------------------------------------------------------------------------
-  %pm_read  --  the %pm_prep-ready reader, mirroring read_sumstat()
-
-    path=         delimited text file (plain text; gunzip .gz first)
-    out=          output data set                      (default pm_sumstat)
-    format=       plink2 | gpcm | custom               (default plink2)
-    chrom_col=    default #CHROM for plink2 and gpcm
-    pos_col=      default POS
-    id_col=       default ID; pass id_col=_none_ when the file has no id
-    value_col=    default P (plink2) or P_HPI (gpcm)
-    test_filter=  1 | 0; default 1 for plink2, 0 otherwise
-    test_col=     default TEST
-    test_val=     default ADD
-    chrom=        comma-separated list to keep, e.g. chrom=%str('1','2')
-    dlm=          delimiter; default '09'x (tab).  Use ',' for csv.
-    guessingrows= PROC IMPORT GUESSINGROWS (default MAX)
-
-  The output data set keeps every original column and adds POSITION and VALUE,
-  the two numeric columns %physmerge works from.  Rows with a missing POSITION
-  or VALUE are dropped, as read_sumstat() drops them.
----------------------------------------------------------------------------*/
 %macro pm_read(path=, out=pm_sumstat, format=plink2,
                chrom_col=, pos_col=, id_col=, value_col=,
                test_filter=, test_col=TEST, test_val=ADD, chrom=,
@@ -144,7 +53,6 @@
   %let fmt = %upcase(&format);
   %let save_vvn = %sysfunc(getoption(validvarname));
 
-  /* ---- format defaults, as in read_sumstat() ---- */
   %if &fmt = PLINK2 %then %do;
     %if %length(&chrom_col) = 0 %then %let chrom_col = %str(#CHROM);
     %if %length(&pos_col)   = 0 %then %let pos_col   = POS;
@@ -202,7 +110,6 @@
     %return;
   %end;
 
-  /* ---- TEST filter ---- */
   %if &test_filter = 1 %then %do;
     %if %length(&vt) = 0 %then %do;
       %put WARNING: test_col '&test_col' not found; TEST filter skipped.;
@@ -224,8 +131,6 @@
     %end;
   %end;
 
-  /* ---- interface columns.  PROC IMPORT turns a column that contains "NA"
-          into a character variable, so always route through input(). ---- */
   data &out;
     set _pm_imp;
     %if %pm_vtype(_pm_imp, &vp) = C %then %do;
@@ -251,7 +156,6 @@
 
   options validvarname=&save_vvn;
 
-  /* remember the resolved names so %physmerge can default to them */
   %global pm_chrom_var pm_pos_var pm_id_var pm_value_var pm_reward;
   %let pm_chrom_var = &vc;
   %let pm_pos_var   = &vp;
@@ -266,10 +170,6 @@
   proc datasets lib=work nolist nowarn; delete _pm_imp; quit;
 %mend pm_read;
 
-
-/*---------------------------------------------------------------------------
-  %pm_nobs(ds) -> observation count
----------------------------------------------------------------------------*/
 %macro pm_nobs(ds);
   %local dsid n rc;
   %let n = 0;
@@ -281,15 +181,6 @@
   &n
 %mend pm_nobs;
 
-
-/*---------------------------------------------------------------------------
-  %pm_prep  --  normalise, drop missing rows, and sort the way R's order() does
-
-  Chromosomes are ranked by first appearance, not alphabetically, so that the
-  block serial numbers line up with physical_merge()'s, which walks
-  unique(data$CHROM).  Within a chromosome the sort is (position, input row),
-  reproducing R's stable order().
----------------------------------------------------------------------------*/
 %macro pm_prep(data=, out=_pm_prep, chrom=, pos=POSITION, value=VALUE, id=,
                idlen=200, chromlen=32);
   data &out(keep=_chrord _chrom _pos _val _id _seq);
@@ -308,8 +199,7 @@
     %else %do;                     _id    = '';           %end;
     _pos = &pos;
     _val = &value;
-    /* a SAS missing value compares low, so it would look significant under
-       reward=min: drop those rows before they reach the scan */
+
     if missing(_pos) or missing(_val) then delete;
     _seq + 1;
     if _h.find() ne 0 then do;
@@ -322,25 +212,6 @@
   proc sort data=&out; by _chrord _pos _seq; run;
 %mend pm_prep;
 
-
-/*---------------------------------------------------------------------------
-  %physmerge  --  forward sliding-window merge
-
-    data=       input data set
-    out=        block table                            (default pm_blocks)
-    sig_th=     significance threshold                 (default 5e-8)
-    window=     window in bp                           (default 500000)
-    reward=     min for p-values (default) | max for test statistics
-    reset_on=   best (default) | any
-    chrom=      chromosome variable; leave blank for a single-chromosome run
-    pos=        position variable                      (default POSITION)
-    value=      value variable                         (default VALUE)
-    id=         lead-SNP id variable, optional
-    idlen=      character length for the id            (default 200)
-
-  Output columns: serial CHROM start end rps_BP rps_ID rps_value, the same set
-  and the same order as annotate_blocks() in R and as the C tool's table.
----------------------------------------------------------------------------*/
 %macro physmerge(data=, out=pm_blocks, sig_th=5e-8, window=500000,
                  reward=min, reset_on=best,
                  chrom=, pos=POSITION, value=VALUE, id=,
@@ -370,11 +241,10 @@
            id=&id, idlen=&idlen, chromlen=&chromlen);
   %let nin = %pm_nobs(_pm_prep);
 
-  /* ---- pass 1: the forward scan (physical_merge's for loop) -------------- */
   data _pm_raw(keep=_chrord _chrom start end rps_BP rps_value rps_ID);
     length _chrom $ &chromlen rps_ID $ &idlen;
     retain in_block steps sig_this last_pos start end rps_BP rps_value rps_ID;
-    /* _chrom is read from the input record; blocks never span a chromosome */
+
     set _pm_prep;
     by _chrord;
 
@@ -397,7 +267,7 @@
       else do;
         steps = remaining;
         %if &ro = ANY %then %do;
-          /* locusDefiner style: any significant SNP resets the window */
+
           if _val &c &sig_th then do;
             steps = &window;
             if _val &c sig_this then link pm_rep;
@@ -408,7 +278,7 @@
           end;
         %end;
         %else %do;
-          /* reset_on = best: reset only on improvement */
+
           if _val &c sig_this then do;
             steps = &window;
             link pm_rep;
@@ -448,7 +318,6 @@
     return;
   run;
 
-  /* ---- pass 2: collapse, then trim, with a one-block lookahead ----------- */
   data _pm_col(keep=_chrord h_chrom h_start h_end h_bp h_val h_id);
     length h_chrom $ &chromlen h_id $ &idlen;
     retain has_held h_chrom h_start h_end h_bp h_val h_id;
@@ -459,14 +328,14 @@
     if first._chrord then has_held = 0;
 
     if has_held then do;
-      if (i_bp - h_bp) < &window then do;          /* .collapse_blocks() */
+      if (i_bp - h_bp) < &window then do;
         if i_end > h_end then h_end = i_end;
         if i_val &c h_val then do;
           h_bp = i_bp; h_val = i_val; h_id = i_id;
         end;
       end;
       else do;
-        if h_end > i_start then h_end = i_start;   /* trim pass */
+        if h_end > i_start then h_end = i_start;
         output;
         link pm_hold;
       end;
@@ -483,7 +352,6 @@
     return;
   run;
 
-  /* ---- pass 3: serial numbers and the public column set ------------------ */
   data &out(keep=serial CHROM start end rps_BP rps_ID rps_value);
     length serial 8 CHROM $ &chromlen start 8 end 8 rps_BP 8
            rps_ID $ &idlen rps_value 8;
@@ -491,9 +359,7 @@
     serial + 1;
     CHROM     = h_chrom;
     start     = h_start;
-    /* start is clamped at 0 by max(0, pos - window) but end is not, so a
-       negative position would otherwise invert the interval.  For a
-       non-negative position this is a no-op. */
+
     end       = max(h_end, h_start);
     rps_BP    = h_bp;
     rps_ID    = h_id;
@@ -507,19 +373,11 @@
   proc datasets lib=work nolist nowarn; delete _pm_prep _pm_raw _pm_col; quit;
 %mend physmerge;
 
-
-/*---------------------------------------------------------------------------
-  %pm_annotate  --  attach the lead SNP's original columns (annotate_blocks)
-
-  Joins the block table back to the input on (CHROM, rps_BP).  When several
-  variants share one base pair the join would be ambiguous, so it also matches
-  on the lead SNP id when the block table carries one.
----------------------------------------------------------------------------*/
 %macro pm_annotate(blocks=pm_blocks, data=, out=pm_blocks_annot,
                    chrom=, pos=POSITION, id=, keep=);
 
   %local addcols;
-  /* every input column except the join keys and the interface columns */
+
   proc sql noprint;
     select strip(name) into :addcols separated by ' '
       from dictionary.columns
@@ -550,20 +408,6 @@
   quit;
 %mend pm_annotate;
 
-
-/*---------------------------------------------------------------------------
-  %pm_export  --  representative SNP ids, one per line (export_snp_list)
-
-    blocks=    block table
-    file=      output file, when by_chrom=0
-    dir=       output directory, when by_chrom=1; writes snp_ch<CHR>.txt
-    id=        column to write; rps_ID by default, rps_BP when there is no id
-    by_chrom=  0 (default) | 1
-
-  A numeric id is written with BEST32., never in scientific notation, so the
-  file stays usable as a PLINK --extract list.  As in the C tool, a chromosome
-  name is sanitised before it becomes part of a file name.
----------------------------------------------------------------------------*/
 %macro pm_export(blocks=pm_blocks, file=, dir=, id=, by_chrom=0);
   %local v t;
   %if %length(&id) %then %let v = &id;
@@ -605,7 +449,7 @@
       set &blocks;
       by CHROM notsorted;
       length _path $ 1024 _safe $ 64 _pmline $ 32767;
-      /* the chromosome comes from the input file, so keep it out of the path */
+
       _safe = translate(cats(CHROM), '___', '/\.');
       _path = cats("&dir", "/snp_ch", _safe, ".txt");
       %if &t = C %then %do; _pmline = &v; %end;

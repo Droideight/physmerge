@@ -1,20 +1,5 @@
-/*
- * physmerge -- C command-line implementation of the physmerge R package.
- *
- * Faithful port of R/physical_merge.R (forward scan + collapse + trim),
- * R/read_sumstat.R (column resolution, TEST / chromosome filters, NA drop)
- * and the ID-export half of R/export.R.
- *
- * Default mode is a single streaming pass: memory use is independent of the
- * number of SNPs (only the current line and one pending block are held).
- * Input that is not already position-sorted within a chromosome is rejected
- * unless --sort is given, which loads the records and stable-sorts them the
- * way R's order() would.
- *
- * Build:  cc -O2 -std=c99 -o physmerge physmerge.c -lz
- */
 #define _POSIX_C_SOURCE 200809L
-#define _CRT_SECURE_NO_WARNINGS      /* MSVC: fopen/strtok are fine as used here */
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -34,12 +19,9 @@
 
 static void die(const char *fmt, ...);
 
-/* Output files this run created.  A fatal error removes them, so a failed run
-   never leaves a truncated block table that looks like a complete one. */
 static const char *g_out_path = NULL, *g_snp_path = NULL;
 static char g_snpdir_file[4096] = {0};
 
-/* ------------------------------------------------------------------ utils */
 static void die(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     fputs("physmerge: error: ", stderr);
@@ -51,8 +33,6 @@ static void die(const char *fmt, ...) {
     exit(2);
 }
 
-/* Refuse to write over the file we are reading: the output is opened for
-   truncation while the input is still being streamed. */
 static int same_file(const char *a, const char *b) {
     if (!a || !b) return 0;
     if (!strcmp(a, b)) return 1;
@@ -75,7 +55,6 @@ static void sset(Sbuf *s, const char *v) {
 }
 static const char *sget(const Sbuf *s) { return s->cap ? s->p : ""; }
 
-/* ----------------------------------------------------------------- reader */
 typedef struct {
     FILE *fp;
 #ifndef PHYSMERGE_NO_ZLIB
@@ -133,7 +112,7 @@ static int rd_fill(Reader *r) {
     r->len += n;
     return 1;
 }
-/* returns NUL-terminated line without the newline, or NULL at EOF */
+
 static char *rd_line(Reader *r) {
     for (;;) {
         if (r->pos < r->len) {
@@ -161,26 +140,12 @@ static char *rd_line(Reader *r) {
     }
 }
 
-/* ------------------------------------------------------------- line split */
-/* Next separator at or after p.  When sep is a space the file is treated as
-   whitespace-delimited, the way fread() reads one, so a tab separates too. */
 static char *find_sep(char *p, char sep, int ws) {
     if (!ws) return strchr(p, sep);
     for (; *p; p++) if (*p == ' ' || *p == '\t') return p;
     return NULL;
 }
 
-/* splits in place; fills fld[0..want-1] (NULL when the line is short).
-
-   Two details follow data.table::fread(), because the R reader and this tool
-   have to agree about what a file says:
-     - a field that starts with '"' runs to the matching quote, with "" standing
-       for one '"'.  Without this a quoted comma splits the row and the record
-       is silently dropped as unparseable.
-     - when sep is a space, a run of spaces or tabs counts as one separator,
-       and leading whitespace is skipped.  Without this a space-padded file has
-       every column shifted by one.
-   Unquoting only ever shortens a field, so it stays safe to do in place. */
 static int split_line(char *s, char sep, char **fld, int want) {
     int k = 0, ws = (sep == ' ');
     for (int i = 0; i < want; i++) fld[i] = NULL;
@@ -200,7 +165,7 @@ static int split_line(char *s, char sep, char **fld, int want) {
                 *w++ = *r++;
             }
             rest = r;
-            *w = '\0';               /* w < r here, so this cannot clobber r */
+            *w = '\0';
         }
         char *e = find_sep(rest, sep, ws);
         if (k < want) fld[k] = val;
@@ -213,7 +178,6 @@ static int split_line(char *s, char sep, char **fld, int want) {
     return k;
 }
 
-/* --------------------------------------------------------- numeric parser */
 static int parse_num(const char *s, double *out) {
     if (!s || !*s) return 0;
     errno = 0;
@@ -222,27 +186,26 @@ static int parse_num(const char *s, double *out) {
     if (end == s) return 0;
     while (*end == ' ' || *end == '\t') end++;
     if (*end) return 0;
-    if (v != v) return 0;               /* NaN, e.g. "nan" */
+    if (v != v) return 0;
     *out = v;
     return 1;
 }
 
-/* ------------------------------------------------------------------- core */
 typedef struct {
     double start, end, rps_bp, rps_val;
     Sbuf id, line;
 } Block;
 
 typedef struct {
-    /* configuration */
+
     double sig_th, window;
-    int reward_max;      /* 0 = "min" (p-values), 1 = "max" (statistics) */
-    int reset_any;       /* 0 = "best", 1 = "any" */
+    int reward_max;
+    int reset_any;
     int have_chrom, have_id, annotate_full;
     FILE *out, *snpf;
     char *snpdir;
     const char *value_name;
-    /* running state */
+
     Sbuf chrom;
     int chrom_set, in_block, has_cur, has_held;
     double steps, sig_this, last_pos;
@@ -261,8 +224,7 @@ static void fmt_pos(char *dst, size_t n, double v) {
 
 static void emit(Core *c, Block *b) {
     char s1[64], s2[64], s3[64];
-    if (b->end < b->start) b->end = b->start;   /* start is clamped at 0; keep
-                                                   the interval from inverting */
+    if (b->end < b->start) b->end = b->start;
     fmt_pos(s1, sizeof s1, b->start);
     fmt_pos(s2, sizeof s2, b->end);
     fmt_pos(s3, sizeof s3, b->rps_bp);
@@ -285,10 +247,9 @@ static void block_copy(Block *d, const Block *s) {
     sset(&d->line, sget(&s->line));
 }
 
-/* collapse pass + trim pass, streamed with a one-block lookahead */
 static void stage(Core *c, Block *b) {
     if (c->has_held) {
-        if ((b->rps_bp - c->held.rps_bp) < c->window) {           /* .collapse_blocks */
+        if ((b->rps_bp - c->held.rps_bp) < c->window) {
             if (b->end > c->held.end) c->held.end = b->end;
             if (is_better(c, b->rps_val, c->held.rps_val)) {
                 c->held.rps_bp = b->rps_bp; c->held.rps_val = b->rps_val;
@@ -296,7 +257,7 @@ static void stage(Core *c, Block *b) {
             }
             return;
         }
-        if (c->held.end > b->start) c->held.end = b->start;       /* trim pass */
+        if (c->held.end > b->start) c->held.end = b->start;
         emit(c, &c->held);
     }
     block_copy(&c->held, b);
@@ -306,9 +267,7 @@ static void stage(Core *c, Block *b) {
 static void open_snpdir_file(Core *c) {
     if (!c->snpdir) return;
     if (c->snpf) fclose(c->snpf);
-    /* the chromosome comes from the input file, so keep it out of the path.
-       Refuse a name too long for the buffer rather than truncating it, which
-       would let two contigs collide on one file name. */
+
     const char *src = sget(&c->chrom);
     char safe[256]; size_t k = 0;
     if (strlen(src) + 1 > sizeof safe)
@@ -331,7 +290,7 @@ static void close_block(Core *c, double last_inblock_pos) {
     stage(c, &c->cur);
 }
 static void open_block(Core *c, double pos, double val, const char *id, const char *line) {
-    c->cur.start = (pos - c->window) > 0 ? (pos - c->window) : 0;   /* max(0, pos - window) */
+    c->cur.start = (pos - c->window) > 0 ? (pos - c->window) : 0;
     c->cur.end = 0;
     c->cur.rps_bp = pos;
     c->cur.rps_val = val;
@@ -385,7 +344,6 @@ static void core_push(Core *c, const char *chrom, double pos, double val,
     c->last_pos = pos;
 }
 
-/* ------------------------------------------------------- --sort buffering */
 typedef struct { int chrom_rank; double pos, val; unsigned long idx; size_t id_off, line_off; } Rec;
 typedef struct { char *p; size_t len, cap; } Arena;
 static size_t arena_put(Arena *a, const char *s) {
@@ -399,10 +357,9 @@ static int rec_cmp(const void *A, const void *B) {
     const Rec *a = A, *b = B;
     if (a->chrom_rank != b->chrom_rank) return a->chrom_rank < b->chrom_rank ? -1 : 1;
     if (a->pos != b->pos) return a->pos < b->pos ? -1 : 1;
-    return a->idx < b->idx ? -1 : (a->idx > b->idx ? 1 : 0);   /* stable, like order() */
+    return a->idx < b->idx ? -1 : (a->idx > b->idx ? 1 : 0);
 }
 
-/* ------------------------------------------------------------------- main */
 static const char *USAGE =
 "physmerge " PM_VERSION " (" PM_BUILD ") -- panel-free physical locus merging\n"
 "\n"
@@ -491,7 +448,6 @@ int main(int argc, char **argv) {
     if (window <= 0) die("`window` must be a single positive numeric value.");
     if (snp_path && snp_dir) die("use either --snp-list or --snp-list-dir, not both");
 
-    /* format defaults, mirroring read_sumstat() */
     int dflt_test_filter = 0;
     if (!strcmp(format, "plink2")) {
         if (!chrom_col) chrom_col = "#CHROM";
@@ -511,7 +467,7 @@ int main(int argc, char **argv) {
     if (test_filter < 0) test_filter = dflt_test_filter;
     if (id_col && !strcmp(id_col, "NA")) id_col = NULL;
     if (no_chrom) chrom_col = NULL;
-    /* read_sumstat normalizes #CHROM -> CHROM */
+
     if (chrom_col && !strcmp(chrom_col, "#CHROM")) chrom_col = "CHROM";
 
     if (same_file(in_path, out_path))
@@ -522,7 +478,7 @@ int main(int argc, char **argv) {
     Reader rd; rd_open(&rd, in_path);
     char *hdr = rd_line(&rd);
     if (!hdr) die("empty input file");
-    /* a UTF-8 BOM would otherwise become part of the first column's name */
+
     if ((unsigned char)hdr[0] == 0xEF && (unsigned char)hdr[1] == 0xBB &&
         (unsigned char)hdr[2] == 0xBF) hdr += 3;
     if (!sep) {
@@ -530,16 +486,16 @@ int main(int argc, char **argv) {
         else if (strchr(hdr, ',')) sep = ',';
         else sep = ' ';
     }
-    /* count header fields, then index them */
+
     int nf = 1; for (char *p = hdr; *p; p++) if (*p == sep) nf++;
-    char *hdr_copy = strdup(hdr);          /* split_line() destroys hdr */
+    char *hdr_copy = strdup(hdr);
     if (!hdr_copy) die("out of memory");
     char **hf = xmalloc((size_t)nf * sizeof(char *));
     split_line(hdr, sep, hf, nf);
     int i_chrom = -1, i_pos = -1, i_id = -1, i_val = -1, i_test = -1;
     for (int k = 0; k < nf; k++) {
         const char *h = hf[k]; if (!h) continue;
-        if (!strcmp(h, "#CHROM")) h = "CHROM";                 /* same normalization */
+        if (!strcmp(h, "#CHROM")) h = "CHROM";
         if (chrom_col && i_chrom < 0 && !strcmp(h, chrom_col)) i_chrom = k;
         if (pos_col   && i_pos   < 0 && !strcmp(h, pos_col))   i_pos   = k;
         if (id_col    && i_id    < 0 && !strcmp(h, id_col))    i_id    = k;
@@ -565,7 +521,6 @@ int main(int argc, char **argv) {
     int want = max_idx + 1;
     char **fld = xmalloc((size_t)want * sizeof(char *));
 
-    /* --chrom keep list */
     char **keep = NULL; int n_keep = 0;
     if (chrom_keep) {
         char *cp = strdup(chrom_keep);
@@ -593,7 +548,7 @@ int main(int argc, char **argv) {
         fputs("\tstart\tend\trps_BP", c.out);
         if (c.have_id) fputs("\trps_ID", c.out);
         fprintf(c.out, "\trps_%s", value_col);
-        if (annotate_full) fprintf(c.out, "\t%s", hdr_copy);   /* original columns */
+        if (annotate_full) fprintf(c.out, "\t%s", hdr_copy);
         fputc('\n', c.out);
     }
 
@@ -605,7 +560,6 @@ int main(int argc, char **argv) {
     Arena arena; memset(&arena, 0, sizeof arena); arena.p = NULL;
     char **cnames = NULL; int n_cn = 0;
 
-    /* one shared per-record handler */
     Sbuf prev_chrom; memset(&prev_chrom, 0, sizeof prev_chrom);
     int prev_set = 0; double prev_pos = 0;
 
@@ -651,7 +605,7 @@ int main(int argc, char **argv) {
             n_rec++;
             continue;
         }
-        /* streaming: verify the ordering assumption R's order() would enforce */
+
         if (prev_set) {
             int same = c.have_chrom ? (strcmp(sget(&prev_chrom), ch) == 0) : 1;
             if (same) {
@@ -684,7 +638,7 @@ int main(int argc, char **argv) {
 
     if (c.out != stdout) fclose(c.out);
     if (c.snpf) fclose(c.snpf);
-    g_out_path = g_snp_path = NULL; g_snpdir_file[0] = '\0';   /* run succeeded */
+    g_out_path = g_snp_path = NULL; g_snpdir_file[0] = '\0';
 
     if (!quiet) {
         if (test_filter) fprintf(stderr, "physmerge: TEST filter: kept %lu of %lu rows where %s = '%s'.\n",

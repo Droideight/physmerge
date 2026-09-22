@@ -14,7 +14,7 @@
 #'     \item{\code{"custom"}}{Specify all column names manually via
 #'       \code{chrom_col}, \code{pos_col}, \code{id_col}, \code{value_col}.}
 #'   }
-#' @param value_col Name of the column to use as the "value" when merging.  
+#' @param value_col Name of the column to use as the "value" when merging.
 #'   Overrides the format default when supplied.  Common choices: \code{"P"},
 #'   \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.
 #' @param chrom_col Chromosome column name.  Overrides format default.
@@ -63,22 +63,18 @@
 #' }
 read_sumstat <- function(path,
                          format      = c("plink2", "gpcm", "custom"),
-                         # default at opción 1
-                         value_col   = NULL, 
-                         # fallback to default if left null
+                         value_col   = NULL,
                          chrom_col   = NULL,
                          pos_col     = NULL,
                          id_col      = NULL,
                          test_filter = NULL,
                          test_col    = "TEST",
-                         # with hard default
                          test_val    = "ADD",
                          chrom       = NULL,
                          ...) {
-  
+
   format <- match.arg(format)
-  
-  # ── Format-specific defaults (proofread) ──────────────────────────────────────
+
   defaults <- list(
     plink2 = list(chrom = "#CHROM", pos = "POS", id = "ID",
                   value = "P",     test_filter = TRUE),
@@ -87,7 +83,7 @@ read_sumstat <- function(path,
     custom = list(chrom = NULL,     pos = NULL,  id = NULL,
                   value = NULL,     test_filter = FALSE)
   )[[format]]
-  
+
   chrom_col   <- chrom_col   %||% defaults$chrom
   pos_col     <- pos_col     %||% defaults$pos
   id_col      <- id_col      %||% defaults$id
@@ -95,30 +91,26 @@ read_sumstat <- function(path,
   test_filter <- test_filter %||% defaults$test_filter
 
   if (is.null(id_col)) id_col <- NA_character_
-  
+
   if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
     stop("For format = 'custom', you must supply chrom_col, pos_col, and value_col.")
-  
-  # ── Read (fread auto-detects separator) ───────────────────────────────────────
+
   df <- tryCatch(
     as.data.frame(data.table::fread(path, header = TRUE,
                                     stringsAsFactors = FALSE,
                                     data.table = FALSE, ...)),
     error = function(e) stop("Failed to read file: ", conditionMessage(e))
   )
-  
-  # Normalise #CHROM → CHROM
+
   names(df)[names(df) == "#CHROM"] <- "CHROM"
   if (chrom_col == "#CHROM") chrom_col <- "CHROM"
-  
-  # ── Validate columns ──────────────────────────────────────────────────────────
+
   needed <- c(chrom_col, pos_col, value_col)
   if (!is.na(id_col)) needed <- c(needed, id_col)
   missing <- setdiff(needed, names(df))
   if (length(missing) > 0L)
     stop("Column(s) not found: ", paste(missing, collapse = ", "))
-  
-  # ── TEST column filter ────────────────────────────────────────────────────────
+
   if (isTRUE(test_filter)) {
     if (!test_col %in% names(df)) {
       warning("test_col '", test_col, "' not found; TEST filter skipped.")
@@ -131,48 +123,39 @@ read_sumstat <- function(path,
         stop("No rows remain after TEST filter.")
     }
   }
-  
-  # ── Chromosome filter ─────────────────────────────────────────────────────────
+
   if (!is.null(chrom)) {
     df <- df[as.character(df[[chrom_col]]) %in% as.character(chrom), ]
     if (nrow(df) == 0L) warning("No rows remain after chromosome filter.")
   }
-  
-  # ── Append interface columns ──────────────────────────────────────────────────
+
   df$position <- suppressWarnings(as.numeric(df[[pos_col]]))
   df$value    <- suppressWarnings(as.numeric(df[[value_col]]))
-  # garner necessary two col df
-  
+
   ok <- !is.na(df$position) & !is.na(df$value)
   if (any(!ok))
     message(sum(!ok), " row(s) dropped (NA in position or value).")
   df <- df[ok, ]
-  # drop any col with na
-  
+
   if (nrow(df) == 0L)
     stop("No usable rows after filtering.")
-  
-  # Sort by chromosome then position
+
   df <- if (chrom_col %in% names(df)) {
     ch <- as.character(df[[chrom_col]])
     df[order(match(ch, unique(ch)), df$position), ]
   } else {
     df[order(df$position), ]
   }
-  # ascending pos
-  
-  # ── Suggest reward direction ──────────────────────────────────────────────────
+
   stat_cols <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
                  "T_STAT_Direct", "T_STAT_TE", "HPI")
   suggested <- if (value_col %in% stat_cols) "max" else "min"
   if (value_col == "LOG10_P")
     message("LOG10_P detected: consider reward = 'max' for physical_merge().")
-  # for the special interpretation of natural log scale
   list(
     data   = df,
     reward = suggested
   )
 }
 
-# Null-coalescing operator (internal)
 `%||%` <- function(x, y) if (is.null(x)) y else x
