@@ -62,32 +62,32 @@
 #'                     id_col = "SNP", value_col = "P")
 #' }
 read_sumstat <- function(path,
-                         format      = c("plink2", "gpcm", "custom"),
-                         value_col   = NULL,
-                         chrom_col   = NULL,
-                         pos_col     = NULL,
-                         id_col      = NULL,
+                         format = c("plink2", "gpcm", "custom"),
+                         value_col = NULL,
+                         chrom_col = NULL,
+                         pos_col = NULL,
+                         id_col = NULL,
                          test_filter = NULL,
-                         test_col    = "TEST",
-                         test_val    = "ADD",
-                         chrom       = NULL,
+                         test_col = "TEST",
+                         test_val = "ADD",
+                         chrom = NULL,
                          ...) {
 
   format <- match.arg(format)
 
   defaults <- list(
     plink2 = list(chrom = "#CHROM", pos = "POS", id = "ID",
-                  value = "P",     test_filter = TRUE),
-    gpcm   = list(chrom = "#CHROM", pos = "POS", id = "ID",
+                  value = "P", test_filter = TRUE),
+    gpcm = list(chrom = "#CHROM", pos = "POS", id = "ID",
                   value = "P_HPI", test_filter = FALSE),
-    custom = list(chrom = NULL,     pos = NULL,  id = NULL,
-                  value = NULL,     test_filter = FALSE)
+    custom = list(chrom = NULL, pos = NULL, id = NULL,
+                  value = NULL, test_filter = FALSE)
   )[[format]]
 
-  chrom_col   <- chrom_col   %||% defaults$chrom
-  pos_col     <- pos_col     %||% defaults$pos
-  id_col      <- id_col      %||% defaults$id
-  value_col   <- value_col   %||% defaults$value
+  chrom_col <- chrom_col %||% defaults$chrom
+  pos_col <- pos_col %||% defaults$pos
+  id_col <- id_col %||% defaults$id
+  value_col <- value_col %||% defaults$value
   test_filter <- test_filter %||% defaults$test_filter
 
   if (is.null(id_col)) id_col <- NA_character_
@@ -115,10 +115,10 @@ read_sumstat <- function(path,
     if (!test_col %in% names(df)) {
       warning("test_col '", test_col, "' not found; TEST filter skipped.")
     } else {
-      n_before <- nrow(df)
-      df       <- df[as.character(df[[test_col]]) == test_val, ]
+      n0 <- nrow(df)
+      df <- df[as.character(df[[test_col]]) == test_val, ]
       message(sprintf("TEST filter: kept %d of %d rows where %s = '%s'.",
-                      nrow(df), n_before, test_col, test_val))
+                      nrow(df), n0, test_col, test_val))
       if (nrow(df) == 0L)
         stop("No rows remain after TEST filter.")
     }
@@ -130,7 +130,7 @@ read_sumstat <- function(path,
   }
 
   df$position <- suppressWarnings(as.numeric(df[[pos_col]]))
-  df$value    <- suppressWarnings(as.numeric(df[[value_col]]))
+  df$value <- suppressWarnings(as.numeric(df[[value_col]]))
 
   ok <- !is.na(df$position) & !is.na(df$value)
   if (any(!ok))
@@ -147,14 +147,14 @@ read_sumstat <- function(path,
     df[order(df$position), ]
   }
 
-  stat_cols <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
+  stats <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
                  "T_STAT_Direct", "T_STAT_TE", "HPI")
-  suggested <- if (value_col %in% stat_cols) "max" else "min"
+  sugg <- if (value_col %in% stats) "max" else "min"
   if (value_col == "LOG10_P")
     message("LOG10_P detected: consider reward = 'max' for physical_merge().")
   list(
-    data   = df,
-    reward = suggested
+    data = df,
+    reward = sugg
   )
 }
 

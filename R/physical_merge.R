@@ -109,7 +109,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   if (!reset_on %in% c("best", "any"))
     stop("`reset_on` must be either 'best' or 'any'.")
 
-  resolved_chrom <- if (!is.null(chrom_col)) {
+  chcol <- if (!is.null(chrom_col)) {
     if (!chrom_col %in% names(data))
       stop("chrom_col '", chrom_col, "' not found in data.")
     chrom_col
@@ -120,19 +120,19 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   }
 
   keep <- !is.na(data$position) & !is.na(data$value)
-  if (!is.null(resolved_chrom)) keep <- keep & !is.na(data[[resolved_chrom]])
+  if (!is.null(chcol)) keep <- keep & !is.na(data[[chcol]])
   if (any(!keep)) {
     message(sum(!keep), " row(s) dropped (NA in position, value",
-            if (!is.null(resolved_chrom)) " or chromosome", ").")
+            if (!is.null(chcol)) " or chromosome", ").")
     data <- data[keep, , drop = FALSE]
   }
-  orig_idx <- which(keep)
+  oidx <- which(keep)
 
   if (nrow(data) == 0L) {
     empty <- data.frame(serial = integer(0), start = numeric(0), end = numeric(0),
                         rps_BP = numeric(0), rps_value = numeric(0),
                         rps_row = integer(0))
-    if (!is.null(resolved_chrom))
+    if (!is.null(chcol))
       empty <- cbind(empty[, "serial", drop = FALSE], CHROM = character(0),
                      empty[, setdiff(names(empty), "serial"), drop = FALSE])
     return(.stash_rps_row(empty))
@@ -142,34 +142,34 @@ physical_merge <- function(data, sig_th, window, reward = "min",
     warning("Negative position(s) found.  Block boundaries are clamped at 0, ",
             "so a block that starts below 0 has no width.")
 
-  if (!is.null(resolved_chrom)) {
-    chroms <- unique(data[[resolved_chrom]])
+  if (!is.null(chcol)) {
+    chroms <- unique(data[[chcol]])
     if (length(chroms) > 1L) {
-      results <- lapply(chroms, function(ch) {
-        sel <- which(data[[resolved_chrom]] == ch)
+      res <- lapply(chroms, function(ch) {
+        sel <- which(data[[chcol]] == ch)
         sub <- data[sel, ]
         blk <- .physical_merge_single(sub, sig_th, window, reward, reset_on)
         if (nrow(blk) == 0L) return(blk)
         blk$rps_row <- sel[blk$rps_row]
-        blk$CHROM   <- ch
+        blk$CHROM <- ch
         blk
       })
-      out <- do.call(rbind, results)
+      out <- do.call(rbind, res)
       if (is.null(out) || nrow(out) == 0L) {
         return(.stash_rps_row(data.frame(serial = integer(0), CHROM = character(0),
                                          start = numeric(0), end = numeric(0),
                                          rps_BP = numeric(0), rps_value = numeric(0),
                                          rps_row = integer(0))))
       }
-      out$serial    <- seq_len(nrow(out))
+      out$serial <- seq_len(nrow(out))
       rownames(out) <- NULL
-      col_order     <- c("serial", "CHROM",
+      cord <- c("serial", "CHROM",
                          setdiff(names(out), c("serial", "CHROM")))
-      return(.stash_rps_row(.remap_rps_row(out[, col_order], orig_idx)))
+      return(.stash_rps_row(.remap_rps_row(out[, cord], oidx)))
     }
   } else {
-    pos_range <- diff(range(data$position))
-    if (pos_range > 2.5e8)
+    rng <- diff(range(data$position))
+    if (rng > 2.5e8)
       warning("Position range > 250 Mb detected but no chromosome column found. ",
               "If data spans multiple chromosomes, SNPs near chromosome ",
               "boundaries may be incorrectly merged into the same block. ",
@@ -177,7 +177,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   }
 
   .stash_rps_row(.remap_rps_row(
-    .physical_merge_single(data, sig_th, window, reward, reset_on), orig_idx))
+    .physical_merge_single(data, sig_th, window, reward, reset_on), oidx))
 }
 
 .remap_rps_row <- function(blk, idx) {
@@ -195,97 +195,97 @@ physical_merge <- function(data, sig_th, window, reward = "min",
 
 .physical_merge_single <- function(data, sig_th, window, reward, reset_on) {
 
-  ord  <- order(data$position)
+  ord <- order(data$position)
   data <- data[ord, ]
-  n    <- nrow(data)
+  n <- nrow(data)
 
-  empty_out <- data.frame(
-    serial    = integer(0), start = numeric(0), end   = numeric(0),
-    rps_BP    = numeric(0), rps_value = numeric(0), rps_row = integer(0)
+  empt <- data.frame(
+    serial = integer(0), start = numeric(0), end = numeric(0),
+    rps_BP = numeric(0), rps_value = numeric(0), rps_row = integer(0)
   )
-  if (n == 0L) return(empty_out)
+  if (n == 0L) return(empt)
 
-  out_serial  <- integer(n);  out_start   <- numeric(n)
-  out_end     <- numeric(n);  out_rps_bp  <- numeric(n)
-  out_rps_val <- numeric(n);  out_rps_row <- integer(n)
-  block_count <- 0L
+  oser <- integer(n); ostart <- numeric(n)
+  oend <- numeric(n); obp <- numeric(n)
+  oval <- numeric(n); orow <- integer(n)
+  nblk <- 0L
 
-  in_block       <- FALSE
-  steps          <- window
-  sig_this_block <- sig_th
-  last_pos       <- data$position[1L]
+  inblk <- FALSE
+  steps <- window
+  best <- sig_th
+  lpos <- data$position[1L]
 
-  open_block <- function(pos, val, i) {
-    block_count <<- block_count + 1L
-    out_serial[block_count]  <<- block_count
-    out_start[block_count]   <<- max(0, pos - window)
-    out_end[block_count]     <<- NA_real_
-    out_rps_bp[block_count]  <<- pos
-    out_rps_val[block_count] <<- val
-    out_rps_row[block_count] <<- ord[i]
-    in_block       <<- TRUE
-    steps          <<- window
-    sig_this_block <<- val
+  openb <- function(pos, val, i) {
+    nblk <<- nblk + 1L
+    oser[nblk] <<- nblk
+    ostart[nblk] <<- max(0, pos - window)
+    oend[nblk] <<- NA_real_
+    obp[nblk] <<- pos
+    oval[nblk] <<- val
+    orow[nblk] <<- ord[i]
+    inblk <<- TRUE
+    steps <<- window
+    best <<- val
   }
 
-  close_block <- function(last_inblock_pos) {
-    out_end[block_count] <<- last_inblock_pos + steps
-    in_block             <<- FALSE
-    steps                <<- window
-    sig_this_block       <<- sig_th
+  closeb <- function(lastp) {
+    oend[nblk] <<- lastp + steps
+    inblk <<- FALSE
+    steps <<- window
+    best <<- sig_th
   }
 
   for (i in seq_len(n)) {
     pos <- data$position[i]
     val <- data$value[i]
 
-    if (!in_block) {
-      if (.is_significant(val, sig_th, reward)) open_block(pos, val, i)
+    if (!inblk) {
+      if (.is_significant(val, sig_th, reward)) openb(pos, val, i)
 
     } else {
-      remaining <- steps - (pos - last_pos)
+      rem <- steps - (pos - lpos)
 
-      if (remaining <= 0) {
-        close_block(last_pos)
-        if (.is_significant(val, sig_th, reward)) open_block(pos, val, i)
+      if (rem <= 0) {
+        closeb(lpos)
+        if (.is_significant(val, sig_th, reward)) openb(pos, val, i)
 
       } else {
-        steps <- remaining
+        steps <- rem
 
         if (reset_on == "any" && .is_significant(val, sig_th, reward)) {
           steps <- window
-          if (.is_more_significant(val, sig_this_block, reward)) {
-            sig_this_block           <- val
-            out_rps_bp[block_count]  <- pos
-            out_rps_val[block_count] <- val
-            out_rps_row[block_count] <- ord[i]
+          if (.is_more_significant(val, best, reward)) {
+            best <- val
+            obp[nblk] <- pos
+            oval[nblk] <- val
+            orow[nblk] <- ord[i]
           }
 
-        } else if (.is_more_significant(val, sig_this_block, reward)) {
-          sig_this_block           <- val
-          steps                    <- window
-          out_rps_bp[block_count]  <- pos
-          out_rps_val[block_count] <- val
-          out_rps_row[block_count] <- ord[i]
+        } else if (.is_more_significant(val, best, reward)) {
+          best <- val
+          steps <- window
+          obp[nblk] <- pos
+          oval[nblk] <- val
+          orow[nblk] <- ord[i]
         }
       }
     }
-    last_pos <- pos
+    lpos <- pos
   }
-  if (in_block) close_block(last_pos)
-  if (block_count == 0L) return(empty_out)
+  if (inblk) closeb(lpos)
+  if (nblk == 0L) return(empt)
 
-  raw_blocks <- data.frame(
-    serial    = out_serial[seq_len(block_count)],
-    start     = out_start[seq_len(block_count)],
-    end       = out_end[seq_len(block_count)],
-    rps_BP    = out_rps_bp[seq_len(block_count)],
-    rps_value = out_rps_val[seq_len(block_count)],
-    rps_row   = out_rps_row[seq_len(block_count)],
+  raw <- data.frame(
+    serial = oser[seq_len(nblk)],
+    start = ostart[seq_len(nblk)],
+    end = oend[seq_len(nblk)],
+    rps_BP = obp[seq_len(nblk)],
+    rps_value = oval[seq_len(nblk)],
+    rps_row = orow[seq_len(nblk)],
     stringsAsFactors = FALSE
   )
 
-  blk <- .collapse_blocks(raw_blocks, window, reward)
+  blk <- .collapse_blocks(raw, window, reward)
 
   if (nrow(blk) > 1L) {
     for (i in seq_len(nrow(blk) - 1L)) {
@@ -304,18 +304,18 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   for (i in seq(2L, nrow(blk))) {
     cur <- blk[i, ]
     if ((cur$rps_BP - out$rps_BP[nrow(out)]) < w) {
-      last          <- nrow(out)
+      last <- nrow(out)
       out$end[last] <- max(out$end[last], cur$end)
       if (.is_more_significant(cur$rps_value, out$rps_value[last], reward)) {
-        out$rps_BP[last]    <- cur$rps_BP
+        out$rps_BP[last] <- cur$rps_BP
         out$rps_value[last] <- cur$rps_value
-        out$rps_row[last]   <- cur$rps_row
+        out$rps_row[last] <- cur$rps_row
       }
     } else {
       out <- rbind(out, cur)
     }
   }
-  out$serial    <- seq_len(nrow(out))
+  out$serial <- seq_len(nrow(out))
   rownames(out) <- NULL
   out
 }

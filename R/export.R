@@ -45,14 +45,14 @@
 #'                 keep_start = FALSE, keep_end = FALSE, keep_rps_value = FALSE)
 #' }
 annotate_blocks <- function(blocks, data,
-                            chrom_col       = NULL,
-                            id_col          = NULL,
-                            keep_serial     = TRUE,
-                            keep_start      = TRUE,
-                            keep_end        = TRUE,
-                            keep_rps_BP     = TRUE,
-                            keep_rps_value  = TRUE,
-                            keep_rps_ID     = TRUE) {
+                            chrom_col = NULL,
+                            id_col = NULL,
+                            keep_serial = TRUE,
+                            keep_start = TRUE,
+                            keep_end = TRUE,
+                            keep_rps_BP = TRUE,
+                            keep_rps_value = TRUE,
+                            keep_rps_ID = TRUE) {
 
   if (nrow(blocks) == 0L) return(blocks)
   if (!"position" %in% names(data))
@@ -67,68 +67,68 @@ annotate_blocks <- function(blocks, data,
       if ("SNP" %in% names(data)) "SNP" else NA
 
   rr <- attr(blocks, "rps_row")
-  use_rr <- !is.null(rr) && length(rr) == nrow(blocks) && !anyNA(rr) &&
+  userr <- !is.null(rr) && length(rr) == nrow(blocks) && !anyNA(rr) &&
     all(rr >= 1L) && all(rr <= nrow(data)) &&
     isTRUE(all.equal(as.numeric(data$position[rr]),
                      as.numeric(blocks$rps_BP), tolerance = 0))
 
-  if (use_rr) {
-    repr   <- data[rr, , drop = FALSE]
+  if (userr) {
+    repr <- data[rr, , drop = FALSE]
     repr$rps_BP <- repr$position
-    has_id <- !is.na(id_col) && id_col %in% names(repr)
-    if (has_id) repr$rps_ID <- repr[[id_col]]
-    lead  <- c(if (has_id) "rps_ID",
+    hasid <- !is.na(id_col) && id_col %in% names(repr)
+    if (hasid) repr$rps_ID <- repr[[id_col]]
+    lead <- c(if (hasid) "rps_ID",
                if (!is.null(chrom_col) && chrom_col %in% names(repr)) chrom_col)
     extra <- setdiff(names(repr), c(lead, "rps_BP", "position", "value",
                                     if (!is.na(id_col)) id_col, chrom_col))
-    repr  <- repr[, c(lead, extra), drop = FALSE]
+    repr <- repr[, c(lead, extra), drop = FALSE]
     if (!is.null(chrom_col) && chrom_col != "CHROM" &&
         chrom_col %in% names(repr) && "CHROM" %in% names(blocks))
       names(repr)[names(repr) == chrom_col] <- "CHROM"
-    add  <- repr[, setdiff(names(repr), names(blocks)), drop = FALSE]
+    add <- repr[, setdiff(names(repr), names(blocks)), drop = FALSE]
     rownames(add) <- NULL
-    out  <- cbind(blocks, add)
+    out <- cbind(blocks, add)
     attr(out, "rps_row") <- NULL
     return(.finish_annotation(out, chrom_col, keep_serial, keep_start, keep_end,
                               keep_rps_BP, keep_rps_value, keep_rps_ID))
   }
 
   if (!is.null(chrom_col) && chrom_col %in% names(data)) {
-    data_dedup <- data[!duplicated(data[, c(chrom_col, "position")]), ]
+    dd <- data[!duplicated(data[, c(chrom_col, "position")]), ]
   } else {
-    data_dedup <- data[!duplicated(data$position), ]
+    dd <- data[!duplicated(data$position), ]
   }
-  if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(data_dedup)) {
-    keys_block <- paste(blocks$CHROM, blocks$rps_BP, sep = ":")
-    keys_data  <- paste(data_dedup[[chrom_col]], data_dedup$position, sep = ":")
-    repr       <- data_dedup[keys_data %in% keys_block, ]
+  if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(dd)) {
+    kb <- paste(blocks$CHROM, blocks$rps_BP, sep = ":")
+    kd <- paste(dd[[chrom_col]], dd$position, sep = ":")
+    repr <- dd[kd %in% kb, ]
   } else {
-    repr <- data_dedup[data_dedup$position %in% blocks$rps_BP, ]
+    repr <- dd[dd$position %in% blocks$rps_BP, ]
   }
-  repr$rps_BP     <- repr$position
+  repr$rps_BP <- repr$position
 
-  has_id <- !is.na(id_col) && id_col %in% names(repr)
-  if (has_id) repr$rps_ID <- repr[[id_col]]
+  hasid <- !is.na(id_col) && id_col %in% names(repr)
+  if (hasid) repr$rps_ID <- repr[[id_col]]
 
-  join_cols <- c("rps_BP",
+  jcols <- c("rps_BP",
                  if (!is.null(chrom_col) && chrom_col %in% names(repr)) chrom_col,
-                 if (has_id) "rps_ID")
-  extra     <- setdiff(names(repr), c(join_cols, "position", "value", id_col))
-  repr      <- repr[, c(join_cols, extra), drop = FALSE]
+                 if (hasid) "rps_ID")
+  extra <- setdiff(names(repr), c(jcols, "position", "value", id_col))
+  repr <- repr[, c(jcols, extra), drop = FALSE]
 
-  merge_keys <- "rps_BP"
+  mkeys <- "rps_BP"
   if ("CHROM" %in% names(blocks) && !is.null(chrom_col) && chrom_col %in% names(repr)) {
     if (chrom_col != "CHROM") names(repr)[names(repr) == chrom_col] <- "CHROM"
-    merge_keys <- c("CHROM", "rps_BP")
+    mkeys <- c("CHROM", "rps_BP")
   }
-  out <- merge(blocks, repr, by = merge_keys, all.x = TRUE)
+  out <- merge(blocks, repr, by = mkeys, all.x = TRUE)
 
-  n_hit <- sum(out$rps_BP %in% repr$rps_BP)
-  if (n_hit == 0L)
+  nhit <- sum(out$rps_BP %in% repr$rps_BP)
+  if (nhit == 0L)
     warning("No block matched a row of `data`; the annotation columns are all ",
             "NA.  Is this the data frame the blocks were built from?")
-  else if (n_hit < nrow(out))
-    warning(nrow(out) - n_hit, " of ", nrow(out),
+  else if (nhit < nrow(out))
+    warning(nrow(out) - nhit, " of ", nrow(out),
             " block(s) matched no row of `data`.")
 
   .finish_annotation(out, chrom_col, keep_serial, keep_start, keep_end,
@@ -138,22 +138,22 @@ annotate_blocks <- function(blocks, data,
 .finish_annotation <- function(out, chrom_col, keep_serial, keep_start, keep_end,
                                keep_rps_BP, keep_rps_value, keep_rps_ID) {
   meta <- c(
-    if (keep_serial)    "serial",
+    if (keep_serial) "serial",
     if (!is.null(chrom_col) && chrom_col %in% names(out)) chrom_col,
     if ("CHROM" %in% names(out) && !identical(chrom_col, "CHROM")) "CHROM",
-    if (keep_start)     "start",
-    if (keep_end)       "end",
-    if (keep_rps_BP)    "rps_BP",
+    if (keep_start) "start",
+    if (keep_end) "end",
+    if (keep_rps_BP) "rps_BP",
     if (keep_rps_ID && "rps_ID" %in% names(out)) "rps_ID",
     if (keep_rps_value) "rps_value"
   )
   meta <- unique(as.character(meta))
   rest <- setdiff(names(out), c(meta, "serial", "start", "end",
                                 "rps_BP", "rps_ID", "rps_value"))
-  keepcols <- c(meta, rest)
-  if (length(keepcols) == 0L)
+  kc <- c(meta, rest)
+  if (length(kc) == 0L)
     stop("Every column was dropped; leave at least one keep_* argument TRUE.")
-  out  <- out[, keepcols, drop = FALSE]
+  out <- out[, kc, drop = FALSE]
   rownames(out) <- NULL
   if ("serial" %in% names(out)) out <- out[order(out$serial), ]
   out
@@ -213,32 +213,32 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
     if (!"CHROM" %in% names(blocks))
       stop("by_chrom = TRUE requires a 'CHROM' column in blocks.")
 
-    old_wd <- getwd()
+    owd <- getwd()
     if (!grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", path))
-      path <- file.path(old_wd, path)
+      path <- file.path(owd, path)
     path <- normalizePath(path, winslash = "/", mustWork = FALSE)
 
-    tmp_dir <- tempfile(pattern = "physmerge_export_")
-    dir.create(tmp_dir)
+    tdir <- tempfile(pattern = "physmerge_export_")
+    dir.create(tdir)
     on.exit({
-      setwd(old_wd)
-      unlink(tmp_dir, recursive = TRUE)
+      setwd(owd)
+      unlink(tdir, recursive = TRUE)
     }, add = FALSE)
 
     chroms <- sort(unique(as.character(blocks$CHROM)))
-    safe   <- gsub("[/\\\\.]", "_", chroms)
+    safe <- gsub("[/\\\\.]", "_", chroms)
     if (anyDuplicated(safe))
       stop("Chromosome names collide once made safe for a file name: ",
            paste(unique(chroms[duplicated(safe) | duplicated(safe, fromLast = TRUE)]),
                  collapse = ", "))
 
     for (i in seq_along(chroms)) {
-      ch_ids <- ids[as.character(blocks$CHROM) == chroms[i]]
-      writeLines(ch_ids, file.path(tmp_dir, paste0("snp_ch", safe[i], ".txt")))
+      cids <- ids[as.character(blocks$CHROM) == chroms[i]]
+      writeLines(cids, file.path(tdir, paste0("snp_ch", safe[i], ".txt")))
     }
 
-    setwd(tmp_dir)
-    ok <- utils::zip(path, files = list.files(tmp_dir), flags = "-j")
+    setwd(tdir)
+    ok <- utils::zip(path, files = list.files(tdir), flags = "-j")
     if (!identical(as.integer(ok), 0L) || !file.exists(path))
       stop("Failed to write the zip archive to ", path)
 
