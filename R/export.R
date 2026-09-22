@@ -52,33 +52,21 @@ annotate_blocks <- function(blocks, data,
                             keep_end        = TRUE,
                             keep_rps_BP     = TRUE,
                             keep_rps_value  = TRUE,
-                            # note, although function to toggle false/true is
-                            # given, if annotate_blocks is not use terminally,
-                            # this should always be set to true as rps_BP is
-                            # used when mergining external information.
                             keep_rps_ID     = TRUE) {
   
   if (nrow(blocks) == 0L) return(blocks)
   if (!"position" %in% names(data))
     stop("`data` must contain a 'position' column.")
   
-  # Resolve chrom column
   if (is.null(chrom_col))
     chrom_col <- if ("CHROM" %in% names(data)) "CHROM" else
       if ("#CHROM" %in% names(data)) "#CHROM" else NULL
   # reading #CHROM is provided in case user did not use read_sumstat
   
-  # Resolve ID column
   if (is.null(id_col))
     id_col <- if ("ID" %in% names(data)) "ID" else
       if ("SNP" %in% names(data)) "SNP" else NA
   
-  # ── Exact representative rows, when physical_merge() recorded them ──────────
-  # physical_merge() stores the input row index of every representative SNP in
-  # attr(blocks, "rps_row").  Using it is the only way to get the right row when
-  # several variants share one base-pair position (multi-allelic sites): the
-  # position-based lookup below can only keep the first row at that position,
-  # which may be a non-significant variant.
   rr <- attr(blocks, "rps_row")
   use_rr <- !is.null(rr) && length(rr) == nrow(blocks) && !anyNA(rr) &&
     all(rr >= 1L) && all(rr <= nrow(data)) &&
@@ -106,7 +94,6 @@ annotate_blocks <- function(blocks, data,
                               keep_rps_BP, keep_rps_value, keep_rps_ID))
   }
 
-  # ── Fallback: position lookup (blocks not produced by this physical_merge) ──
   if (!is.null(chrom_col) && chrom_col %in% names(data)) {
     data_dedup <- data[!duplicated(data[, c(chrom_col, "position")]), ]
   } else {
@@ -142,9 +129,6 @@ annotate_blocks <- function(blocks, data,
   }
   out <- merge(blocks, repr, by = merge_keys, all.x = TRUE)
 
-  # Every block should have found its representative.  When none did, `data` is
-  # almost certainly not the frame these blocks were built from, and the result
-  # would otherwise be a silent table of NAs.
   n_hit <- sum(out$rps_BP %in% repr$rps_BP)
   if (n_hit == 0L)
     warning("No block matched a row of `data`; the annotation columns are all ",
@@ -157,8 +141,6 @@ annotate_blocks <- function(blocks, data,
                      keep_rps_BP, keep_rps_value, keep_rps_ID)
 }
 
-
-# Internal: shared column selection / ordering for annotate_blocks()
 .finish_annotation <- function(out, chrom_col, keep_serial, keep_start, keep_end,
                                keep_rps_BP, keep_rps_value, keep_rps_ID) {
   meta <- c(
@@ -171,7 +153,7 @@ annotate_blocks <- function(blocks, data,
     if (keep_rps_ID && "rps_ID" %in% names(out)) "rps_ID",
     if (keep_rps_value) "rps_value"
   )
-  meta <- unique(as.character(meta))       # character(0), not NULL, when all
+  meta <- unique(as.character(meta))
   rest <- setdiff(names(out), c(meta, "serial", "start", "end",
                                 "rps_BP", "rps_ID", "rps_value"))
   keepcols <- c(meta, rest)
@@ -226,9 +208,7 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
     id_col <- if ("rps_ID" %in% names(blocks)) "rps_ID" else "rps_BP"
   if (!id_col %in% names(blocks))
     stop("Column '", id_col, "' not found in blocks.")
-  
-  # as.character(900000) is "9e+05", which PLINK --extract cannot read.  Format
-  # a numeric id -- rps_BP, when the blocks carry no rps_ID -- in full.
+
   ids <- if (is.numeric(blocks[[id_col]]))
     format(blocks[[id_col]], scientific = FALSE, trim = TRUE)
   else
@@ -243,10 +223,6 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
       stop("by_chrom = TRUE requires a 'CHROM' column in blocks.")
     
     old_wd <- getwd()
-    # normalizePath() returns a path that does not exist yet unchanged, and the
-    # zip is written after a setwd() into the temp directory -- so a relative
-    # path used to land inside that directory and be deleted with it, while the
-    # success message still printed.  Anchor it to the caller's directory.
     if (!grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", path))
       path <- file.path(old_wd, path)
     path <- normalizePath(path, winslash = "/", mustWork = FALSE)
@@ -254,13 +230,11 @@ export_snp_list <- function(blocks, path, by_chrom = FALSE, id_col = NULL) {
     tmp_dir <- tempfile(pattern = "physmerge_export_")
     dir.create(tmp_dir)
     on.exit({
-      setwd(old_wd)                        # restore wd even if zip fails
-      unlink(tmp_dir, recursive = TRUE)    # then clean up tmp dir
+      setwd(old_wd)
+      unlink(tmp_dir, recursive = TRUE)
     }, add = FALSE)
     
     chroms <- sort(unique(as.character(blocks$CHROM)))
-    # the chromosome comes from the input file, so keep it out of the path;
-    # cli/physmerge.c sanitizes the same three characters
     safe   <- gsub("[/\\\\.]", "_", chroms)
     if (anyDuplicated(safe))
       stop("Chromosome names collide once made safe for a file name: ",

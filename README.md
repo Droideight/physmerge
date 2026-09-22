@@ -284,8 +284,6 @@ merged wrongly; add `--sort` in that case.
 ## 6. More
 
 - `physmerge --help`: every flag
-- `cli/PERFORMANCE.txt`: benchmarks, validation, and the known differences from
-  the R package
 - `sas/physmerge.sas`: its header is the SAS reference
 
 MIT licensed.

@@ -1,4 +1,4 @@
-# Internal helpers — not exported, not documented publicly
+# Internal helpers
 
 .is_significant <- function(val, sig_th, reward) {
   if (reward == "min") val < sig_th else val > sig_th
@@ -127,12 +127,6 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   }
   
   # ── Drop unusable rows ───────────────────────────────────────────────────────
-  # A comparison against NA is NA, and `if (NA)` is an error, so a single NA in
-  # `value` used to abort the whole run with "missing value where TRUE/FALSE
-  # needed".  An NA in the chromosome column was worse: `which(chrom == ch)`
-  # quietly discarded the row, so a genome-wide significant SNP could vanish
-  # without a word.  Both are now dropped explicitly and counted, matching
-  # read_sumstat(), cli/physmerge.c and sas/physmerge.sas.
   keep <- !is.na(data$position) & !is.na(data$value)
   if (!is.null(resolved_chrom)) keep <- keep & !is.na(data[[resolved_chrom]])
   if (any(!keep)) {
@@ -140,7 +134,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
             if (!is.null(resolved_chrom)) " or chromosome", ").")
     data <- data[keep, , drop = FALSE]
   }
-  orig_idx <- which(keep)   # row of the caller's `data` for each kept row
+  orig_idx <- which(keep)
 
   if (nrow(data) == 0L) {
     empty <- data.frame(serial = integer(0), start = numeric(0), end = numeric(0),
@@ -164,7 +158,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
         sub <- data[sel, ]
         blk <- .physical_merge_single(sub, sig_th, window, reward, reset_on)
         if (nrow(blk) == 0L) return(blk)
-        blk$rps_row <- sel[blk$rps_row]   # subset index -> row of `data`
+        blk$rps_row <- sel[blk$rps_row]
         blk$CHROM   <- ch
         blk
       })
@@ -195,19 +189,12 @@ physical_merge <- function(data, sig_th, window, reward = "min",
 }
 
 
-# Internal: translate representative row indices from the filtered frame back
-# onto the frame the caller passed in, so annotate_blocks() still lines up.
 .remap_rps_row <- function(blk, idx) {
   if (!is.null(blk$rps_row) && length(blk$rps_row))
     blk$rps_row <- idx[blk$rps_row]
   blk
 }
 
-
-# Internal: move the representative-SNP row index off the visible data frame
-# and onto an attribute, so the public column set is unchanged.  annotate_blocks()
-# uses it to pick the exact input row that became the representative, which
-# matters when several variants share one base-pair position.
 .stash_rps_row <- function(blk) {
   rr <- blk$rps_row
   blk$rps_row <- NULL
@@ -215,8 +202,6 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   blk
 }
 
-
-# Internal: single-chromosome merging
 .physical_merge_single <- function(data, sig_th, window, reward, reset_on) {
   
   ord  <- order(data$position)
@@ -277,7 +262,6 @@ physical_merge <- function(data, sig_th, window, reward = "min",
         steps <- remaining
         
         if (reset_on == "any" && .is_significant(val, sig_th, reward)) {
-          # locusDefiner-style: any significant SNP resets the window.
           # Update representative only if this SNP is also more significant.
           steps <- window
           if (.is_more_significant(val, sig_this_block, reward)) {
@@ -288,7 +272,7 @@ physical_merge <- function(data, sig_th, window, reward = "min",
           }
           
         } else if (.is_more_significant(val, sig_this_block, reward)) {
-          # reset_on == "best": reset only on improvement (original behaviour).
+          # reset_on == "best": reset only on improvement
           sig_this_block           <- val
           steps                    <- window
           out_rps_bp[block_count]  <- pos
@@ -325,8 +309,6 @@ physical_merge <- function(data, sig_th, window, reward = "min",
   blk
 }
 
-
-# Internal: collapse pass
 .collapse_blocks <- function(blk, w, reward) {
   if (nrow(blk) <= 1L) return(blk)
   out <- blk[1L, ]
