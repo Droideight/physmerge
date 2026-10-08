@@ -76,7 +76,9 @@ significant SNP is found, regardless of its value. This is
 equivalent to taking the union of \eqn{\pm}\code{window} intervals
 around every significant SNP (i.e. locusDefiner-style logic).}
 \item{\code{"best"}}{Steps reset only when a \emph{more} significant
-SNP is found. The representative SNP is always the local maximum.}
+SNP is found. The representative SNP is always the local maximum. A long
+run of comparably significant SNPs is split roughly every \code{window}
+bp.}
 }
 \item \strong{Collapse pass}: merges adjacent blocks whose representative
 SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining

@@ -34,8 +34,9 @@ representatives of successive blocks are at least one window apart, but because
 each block is padded by one window on both sides, adjacent blocks still overlap
 whenever that gap is less than two windows; a final trim step therefore shortens
 any block whose downstream-extended end runs past the next block's
-upstream-extended start, giving contiguous, strictly non-overlapping blocks. With
-a chromosome column the algorithm runs per chromosome.
+upstream-extended start, giving contiguous, strictly non-overlapping blocks. A
+block is two windows wide only when it is isolated; a trimmed block is narrower.
+With a chromosome column the algorithm runs per chromosome.
 
 ---
 
@@ -279,7 +280,9 @@ position-sorted, `--no-header`, `--quiet`, `--help`.
 `--reset-on` controls how a block stays open. `any`, the default, extends an open
 block whenever the next significant SNP lies within the window of the current
 one, which is the union of the ±window intervals around all significant SNPs;
-`best` refills the window only when a more significant SNP appears.
+`best` refills the window only when a more significant SNP appears, so a long
+run of comparably significant SNPs is cut roughly every window into contiguous
+pieces; use `any` when the region should come out as one block.
 
 To merge a file as one sequence, pass `--no-chrom` on the command line, or
 `chrom_col = NA` to `read_sumstat()`. Both work whether or not the file has a
