@@ -383,6 +383,7 @@ static const char *USAGE =
 "      --value-col NAME   value column        (plink2: P, gpcm: P_HPI)\n"
 "      --sep CHAR         field separator; default auto-detect from header\n"
 "      --no-chrom         ignore the chromosome column entirely\n"
+"      --sort             buffer and sort the input (needed if unsorted)\n"
 "\n"
 "Filters (as in read_sumstat)\n"
 "      --test-col NAME    default TEST\n"
@@ -395,7 +396,7 @@ static const char *USAGE =
 "  -s, --sig-th NUM       significance threshold (default 5e-8)\n"
 "  -w, --window NUM       window in bp (default 500000)\n"
 "  -r, --reward min|max   min for p-values (default), max for statistics\n"
-"      --reset-on best|any  window reset rule (default any)\n"
+"      --reset-on any|best  window reset rule (default any)\n"
 "\n"
 "Output\n"
 "  -o, --out FILE         block table (default stdout)\n"
@@ -403,9 +404,9 @@ static const char *USAGE =
 "      --snp-list-dir DIR one snp_ch<CHR>.txt per chromosome\n"
 "      --annotate-full    append the full original line of each lead SNP\n"
 "      --no-header        suppress the output header line\n"
-"      --sort             buffer and sort the input (needed if unsorted)\n"
 "  -q, --quiet            suppress progress messages\n"
-"  -h, --help             this help;  --version  print version\n";
+"  -h, --help             this help\n"
+"      --version          print version\n";
 
 int main(int argc, char **argv) {
     const char *inp = NULL, *outp = NULL, *snpp = NULL, *snpd = NULL;

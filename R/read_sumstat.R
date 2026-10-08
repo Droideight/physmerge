@@ -39,8 +39,11 @@
 #' @return A named list with two elements:
 #' \describe{
 #' \item{\code{data}}{The prepared data frame with all original columns plus
-#' \code{position} and \code{value} appended, sorted by position.
-#' Rows with \code{NA} in any column are dropped. #CHROM renamed to CHR.}
+#' \code{position} and \code{value} appended, sorted by position (within
+#' chromosome, in order of first appearance, when there is a chromosome
+#' column). Rows with \code{NA} in position or value are dropped. A
+#' \code{#CHROM} column is renamed \code{CHROM}; with \code{chrom_col = NA},
+#' a \code{CHROM} column is renamed \code{#CHROM} instead.}
 #' \item{\code{reward}}{Suggested reward direction for
 #' \code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
 #' test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}

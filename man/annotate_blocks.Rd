@@ -20,8 +20,9 @@ annotate_blocks(
 \arguments{
 \item{blocks}{Data frame returned by \code{\link{physical_merge}}.}
 
-\item{data}{The original input data frame passed to
-the \code{data} element returned by \code{\link{read_sumstat}}. Must contain a \code{position} column.}
+\item{data}{The data frame that was passed to \code{\link{physical_merge}},
+usually the \code{data} element returned by \code{\link{read_sumstat}}.
+Must contain a \code{position} column.}
 
 \item{chrom_col}{Name of the chromosome column in \code{data}. If
 \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.}

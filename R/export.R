@@ -11,8 +11,9 @@
 #' individually included or dropped.
 #'
 #' @param blocks Data frame returned by \code{\link{physical_merge}}.
-#' @param data The original input data frame passed to
-#' the \code{data} element returned by \code{\link{read_sumstat}}. Must contain a \code{position} column.
+#' @param data The data frame that was passed to \code{\link{physical_merge}},
+#' usually the \code{data} element returned by \code{\link{read_sumstat}}.
+#' Must contain a \code{position} column.
 #' @param chrom_col Name of the chromosome column in \code{data}. If
 #' \code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.
 #' @param id_col Name of the SNP ID column in \code{data} used to populate

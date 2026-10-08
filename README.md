@@ -1,42 +1,45 @@
 # physmerge
 
-Linkage disequilibrium (LD) within a GWAS study can produce spurious hits; this is
-commonly addressed using an LD reference panel to perform clumping. In situations
-where only summary statistics are available, however, distance-based locus
-definition is the panel-free alternative but is typically applied as ad-hoc
-per-study code.
+Linkage disequilibrium (LD) makes neighbouring SNPs in a GWAS significant
+together, so one association signal shows up as many correlated hits. This is
+commonly addressed by clumping against an LD reference panel. When only summary
+statistics are available, distance-based locus definition is the panel-free
+alternative, but it is usually written as ad-hoc code for each study.
 
-physmerge collapses significant SNPs into non-overlapping locus blocks from
-summary statistics alone using a forward sliding-window rule (an open block is
-extended whenever the next significant SNP lies within the window of the current
-one), yielding contiguous, strictly non-overlapping locus blocks directly from
-summary statistics. This repository carries three implementations that return
-the same blocks: an R package, a standalone executable, and a Base SAS port.
-The executable reads the file in one streaming pass, so its memory use stays at
-about 2.4 MB (1.85 GB input, 2.4 MB resident).
+physmerge collapses significant SNPs into contiguous, strictly non-overlapping
+locus blocks, using summary statistics alone. It applies a forward
+sliding-window rule: an open block is extended whenever the next significant SNP
+lies within one window of the previous one. This repository carries three
+implementations that return the same blocks: an R package, a standalone
+executable, and a Base SAS port. The executable reads the file in one streaming
+pass, so its memory use does not grow with the input; a 1.85 GB file ran in
+2.4 MB of memory.
 
 ## How it works
 
 `physical_merge()` makes a single forward pass over position-sorted summary
 statistics. A block opens at the first significant SNP, with its start placed one
 window upstream (`max(0, position - window)`). The block carries a window-sized
-budget that is spent by the distance traveled and refilled to the full window at
-every significant SNP; it stays open until the budget runs out, equivalently, 
-until the next significant SNP lies one window or more beyond the previous one,
-at which point it closes one window downstream of the last significant 
-SNP, mirroring its start. A new block opens upon the next significant SNP until 
-the last position is visited. That refill-at-every-significant-SNP rule is
-`reset_on = "any"`, the default; `reset_on = "best"` refills only at a SNP more
-significant than the current representative, so a block closes earlier.
+budget. The distance travelled spends the budget, and every significant SNP
+refills it to the full window. The block stays open until the budget runs out,
+which happens when the next significant SNP lies one window or more beyond the
+previous one. The block then closes one window downstream of its last
+significant SNP, mirroring its start, and the next significant SNP opens a new
+block. The pass ends at the last position.
 
-The representative of each block is its most significant SNP. The
-representatives of successive blocks are at least one window apart, but because
-each block is padded by one window on both sides, adjacent blocks still overlap
-whenever that gap is less than two windows; a final trim step therefore shortens
-any block whose downstream-extended end runs past the next block's
-upstream-extended start, giving contiguous, strictly non-overlapping blocks. A
-block is two windows wide only when it is isolated; a trimmed block is narrower.
-With a chromosome column the algorithm runs per chromosome.
+This refill-at-every-significant-SNP rule is `reset_on = "any"`, the default.
+With `reset_on = "best"`, only a SNP more significant than the block's current
+representative refills the budget, so a block can close while significant SNPs
+continue.
+
+The representative of each block is its most significant SNP. Each block is
+padded by one window on both sides, so two adjacent blocks overlap whenever the
+gap between the last significant SNP of one and the first significant SNP of the
+next is less than two windows. A final trim step moves the end of the earlier
+block back to the start of the next one. The result is contiguous, strictly
+non-overlapping blocks. A block is two windows wide only when it is isolated; a
+trimmed block is narrower. With a chromosome column the algorithm runs per
+chromosome.
 
 ---
 
@@ -106,10 +109,9 @@ Point `PMDIR` at the `sas` directory of a clone and include the file:
 %pm_version;
 ```
 
-The header of `sas/physmerge.sas` has the macro reference and the SAS-specific
-traps worth knowing about: a missing value compares below every number, and
-`BEST32.` does not read p-values far below 1e-300 reliably, so merge on
-`LOG10_P` with `reward=max` if yours reach that range.
+Two SAS-specific traps: a missing value compares below every number, and
+`BEST32.` does not read p-values far below 1e-300 reliably. If your p-values
+reach that range, merge on `LOG10_P` with `reward=max`.
 
 ---
 
@@ -134,7 +136,7 @@ serial  CHROM  start    end      rps_BP   rps_ID    rps_P
 3       2      0        1020000  500000   rs100042  9.9e-20
 ```
 
-`./demo.sh` in that directory walks through six variations of the same file.
+`./demo.sh` in that directory runs six variations on the same file.
 
 The equivalent in R:
 
@@ -191,11 +193,12 @@ physmerge --input gwas.glm.linear --format plink2 --quiet | head
 
 ### Output columns
 
-`physical_merge()` returns one row per block (serial, chromosome, start, end,
-representative position and value); `annotate_blocks()` joins original fields back
-to each representative, and `export_snp_list()` writes representative SNP IDs as a
-flat file or per-chromosome ZIP. The executable does all four steps in one call.
-
+In R, `read_sumstat()` reads and filters the file. `physical_merge()` returns
+one row per block: serial, chromosome, start, end, representative position and
+value. `annotate_blocks()` joins the original fields back to each
+representative, and `export_snp_list()` writes the representative SNP IDs as a
+flat file or a per-chromosome ZIP. The executable does all four steps in one
+call.
 
 | Column | Meaning |
 |---|---|
@@ -213,8 +216,9 @@ Blocks do not overlap; within a chromosome, `end[i] <= start[i+1]`.
 
 ## 4. Recipes
 
-Standard PLINK2 `.glm.*` output. The `plink2` format keeps only `TEST=ADD`
-rows and drops rows with a missing p-value, so no pre-filtering is needed:
+For standard PLINK2 `.glm.*` output, use the `plink2` format. It keeps only
+`TEST=ADD` rows and drops rows with a missing p-value, so no pre-filtering is
+needed:
 
 ```bash
 physmerge --input gwas.glm.linear --format plink2 \
@@ -222,8 +226,8 @@ physmerge --input gwas.glm.linear --format plink2 \
   --out blocks.tsv --snp-list lead_snps.txt
 ```
 
-The value column is `-log10(P)` rather than `P` (PLINK2 writes
-`NEG_LOG10_P` for some runs). Point at the column, flip the direction, and
+If the value column is `-log10(P)` rather than `P` (PLINK2 writes
+`NEG_LOG10_P` for some runs), point at the column, flip the direction, and
 convert the threshold (`-log10(5e-8) = 7.30103`):
 
 ```bash
@@ -236,8 +240,8 @@ Leave the TEST filter on. `--no-test-filter` admits the DOMDEV and RECESSIVE
 rows as well, which can produce a block whose representative is not an additive
 test; use it only for a file that has no TEST column.
 
-Any other table, space-, tab- or comma-separated; the separator is read from
-the header. Name the columns:
+For any other table, use `--format custom` and name the columns. The file can
+be space-, tab- or comma-separated; the separator is read from the header:
 
 ```bash
 physmerge --input sumstats.txt --format custom \
@@ -251,11 +255,11 @@ Feed the lead SNPs straight into PLINK:
 plink2 --pfile your_data --extract lead_snps.txt --make-pgen --out lead_only
 ```
 
-Choosing a window. A larger window merges more. Where significant SNPs are
-dense and never more than one window apart, `--window 500000`
-chains the whole region into a single block; shrink the window for finer loci. In
-a chr22 HbA1c scan (1.25 million SNPs, 2,550 of them genome-wide significant),
-500 kb returned 1 block; in comparison, 25 kb returned 542.
+A larger window merges more. Where significant SNPs are dense and never more
+than one window apart, `--window 500000` chains the whole region into a single
+block; shrink the window for finer loci. In a chr22 HbA1c scan (1.25 million
+SNPs, 2,550 of them genome-wide significant), 500 kb returned 1 block and 25 kb
+returned 542.
 
 ---
 
@@ -271,18 +275,18 @@ a chr22 HbA1c scan (1.25 million SNPs, 2,550 of them genome-wide significant),
 | `window` | `--window 500000` |
 | `reward = "min"` / `"max"` | `--reward min\|max` |
 | `reset_on = "any"` (default) / `"best"` | `--reset-on any\|best` |
-| `annotate_blocks()` | on by default; `--annotate-full` appends every original column |
+| `annotate_blocks()` | the executable always adds the lead SNP id; `--annotate-full` appends every original column |
 | `export_snp_list()` | `--snp-list FILE`, `--snp-list-dir DIR` |
 
 Other flags: `--sep` to force a separator, `--sort` for input that is not
 position-sorted, `--no-header`, `--quiet`, `--help`.
 
-`--reset-on` controls how a block stays open. `any`, the default, extends an open
-block whenever the next significant SNP lies within the window of the current
-one, which is the union of the ±window intervals around all significant SNPs;
-`best` refills the window only when a more significant SNP appears, so a long
-run of comparably significant SNPs is cut roughly every window into contiguous
-pieces; use `any` when the region should come out as one block.
+`--reset-on` controls how a block stays open. With `any`, the default, every
+significant SNP refills the window, which gives the union of the ±window
+intervals around all significant SNPs. With `best`, only a more significant SNP
+refills it. A long run of comparably significant SNPs is then cut roughly every
+window into contiguous pieces. Use `any` when such a region should come out as
+one block.
 
 To merge a file as one sequence, pass `--no-chrom` on the command line, or
 `chrom_col = NA` to `read_sumstat()`. Both work whether or not the file has a
@@ -301,6 +305,5 @@ block of a chromosome can end past the chromosome's length by up to one window.
 ## 6. More
 
 - `physmerge --help`: every flag
-- `sas/physmerge.sas`: its header is the SAS reference
 
 MIT licensed.
