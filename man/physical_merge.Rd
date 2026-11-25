@@ -6,101 +6,69 @@
 \usage{
 physical_merge(
   data,
-  sig_th,
-  window,
-  reward = "min",
-  reset_on = "any",
-  chrom_col = NULL
+  sig_th = NULL,
+  window = 5e+05,
+  reward = NULL,
+  sort = FALSE,
+  quiet = FALSE
 )
 }
 \arguments{
-\item{data}{A data frame with (at least) two numeric columns:
-\describe{
-\item{\code{position}}{Base-pair coordinate, resorted internally.}
-\item{\code{value}}{Test statistic or p-value.}
-}}
+\item{data}{A data frame with numeric columns \code{position} and
+\code{value}, and optionally \code{chrom} and \code{id}, as returned by
+\code{\link{read_sumstat}}.}
 
-\item{sig_th}{Significance threshold (length-1 numeric).}
+\item{sig_th}{Significance threshold. \code{NULL} sets it from the value
+column's name.}
 
-\item{window}{Window size in base-pairs (positive numeric).}
+\item{window}{Window size in base pairs. Default 500000.}
 
-\item{reward}{\code{"min"} (default) for p-values; \code{"max"} for
-test statistics.}
+\item{reward}{\code{"min"} when smaller values are more significant
+(p-values), \code{"max"} when larger ones are. \code{NULL} sets it from the
+value column's name.}
 
-\item{reset_on}{\code{"any"} (default): steps reset whenever any
-significant SNP is encountered inside the current block, equivalent to
-the union-of-intervals logic used by locusDefiner. \code{"best"}: steps
-reset only when a more significant SNP is encountered.}
+\item{sort}{\code{FALSE} (default) stops on input that is not
+position-sorted within each chromosome. \code{TRUE} sorts it first.}
 
-\item{chrom_col}{Name of the chromosome column in \code{data}. If
-\code{NULL} (default), the function auto-detects a column named
-\code{"CHROM"}. When a chromosome column is found and contains more
-than one unique value, the algorithm runs per chromosome.}
+\item{quiet}{\code{TRUE} hides progress messages. Warnings and errors are
+still shown.}
 }
 \value{
-A data frame with one row per merged locus block:
-\describe{
-\item{\code{serial}}{Sequential block index (1, 2, 3, …).}
-\item{\code{CHROM}}{Chromosome (present when a chromosome column is
-detected).}
-\item{\code{start}}{Block start in bp.}
-\item{\code{end}}{Block end in bp.}
-\item{\code{rps_BP}}{Position of the most significant representative SNP.}
-\item{\code{rps_value}}{Value of the representative SNP.}
-}
-
-The returned data frame additionally carries an attribute
-\code{"rps_row"}: the row index in \code{data} of each representative SNP.
-\code{\link{annotate_blocks}} uses it to recover the exact input row, which
-is the only reliable way to label a block when several variants share one
-base-pair position (multi-allelic sites). The attribute is not a column and
-does not change the visible output.
+A data frame with one row per block: \code{serial}, \code{CHROM}
+(when \code{data} has a \code{chrom} column), \code{start}, \code{end},
+\code{rps_BP}, \code{rps_ID} (when \code{data} has an \code{id} column) and
+the representative's value, named \code{rps_} followed by the name of the
+value column, e.g. \code{rps_P}. The attribute \code{"rps_row"} holds the
+row of \code{data} each representative came from.
 }
 \description{
-Scans a position-sorted genomic data frame and collapses nearby significant
-signals into non-overlapping locus blocks using a forward sliding-window
-approach. No LD reference panel is required.
+Scans position-sorted summary statistics and collapses nearby significant
+SNPs into contiguous, strictly non-overlapping locus blocks. No LD reference
+panel is required.
 }
 \details{
-The algorithm works in three passes:
+A block opens at the first significant SNP, one window upstream of it. The
+block carries a window-sized budget that the distance travelled spends, and
+every significant SNP refills it, which gives the union of the
+\eqn{\pm}\code{window} intervals around all significant SNPs. When the
+budget runs out, the
+block closes one window downstream of its last significant SNP. Blocks whose
+representatives lie less than one window apart are then merged, and the end
+of each block is trimmed back to the start of the next one. With a
+\code{chrom} column the merge runs per chromosome, in order of first
+appearance.
 
-\enumerate{
-\item \strong{Forward scan}: opens a block when a significant SNP is
-encountered and keeps it alive as long as the window has not been
-exhausted. The behaviour when a significant (but not necessarily more
-significant) SNP is found inside the block is controlled by
-\code{reset_on}:
-\describe{
-\item{\code{"any"} (default)}{Steps reset whenever \emph{any}
-significant SNP is found, regardless of its value. This is
-equivalent to taking the union of \eqn{\pm}\code{window} intervals
-around every significant SNP (i.e. locusDefiner-style logic).}
-\item{\code{"best"}}{Steps reset only when a \emph{more} significant
-SNP is found. The representative SNP is always the local maximum. A long
-run of comparably significant SNPs is split roughly every \code{window}
-bp.}
-}
-\item \strong{Collapse pass}: merges adjacent blocks whose representative
-SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
-the more significant representative.
-\item \strong{Trim pass}: if after collapsing any block's \code{end}
-still overlaps the next block's \code{start}, the \code{end} is trimmed
-to \code{start} of the next block, guaranteeing zero overlap.
-}
-
-When the input contains multiple chromosomes (detected via \code{chrom_col}
-or an existing \code{CHROM} column), the algorithm is run independently per
-chromosome to prevent cross-boundary merges.
+The reward direction and the threshold follow the name of the column the
+values came from, when \code{reward} or \code{sig_th} is not given:
+\code{P}, \code{PVAL}, \code{PVALUE}, \code{P_VALUE}, \code{P-VALUE} and any
+name starting with \code{P_} give \code{"min"} and \code{5e-8};
+\code{NEG_LOG10_P} and \code{LOG10_P} give \code{"max"} and
+\code{-log10(5e-8)}. Any other column needs both set by hand.
 }
 \examples{
 df <- data.frame(
 position = c(100, 200, 350, 5000, 5100, 5200, 9000),
 value = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 )
-# default: reset on any significant SNP
 physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
-
-# reset only when a more significant SNP appears
-physical_merge(df, sig_th = 0.05, window = 500, reward = "min",
-reset_on = "best")
 }

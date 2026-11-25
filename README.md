@@ -10,27 +10,23 @@ physmerge collapses significant SNPs into contiguous, strictly non-overlapping
 locus blocks, using summary statistics alone. It applies a forward
 sliding-window rule: an open block is extended whenever the next significant SNP
 lies within one window of the previous one. This repository carries three
-implementations that return the same blocks: an R package, a standalone
-executable, and a Base SAS port. The executable reads the file in one streaming
-pass, so its memory use does not grow with the input; a 1.85 GB file ran in
-2.4 MB of memory.
+implementations that take the same options and return the same blocks: an R
+package, a standalone executable, and a Base SAS port. The executable reads the
+file in one streaming pass, so its memory use does not grow with the input; a
+1.85 GB file ran in 2.4 MB of memory.
 
 ## How it works
 
-`physical_merge()` makes a single forward pass over position-sorted summary
-statistics. A block opens at the first significant SNP, with its start placed one
-window upstream (`max(0, position - window)`). The block carries a window-sized
+physmerge makes a single forward pass over position-sorted summary statistics.
+A block opens at the first significant SNP, with its start placed one window
+upstream (`max(0, position - window)`). The block carries a window-sized
 budget. The distance travelled spends the budget, and every significant SNP
 refills it to the full window. The block stays open until the budget runs out,
 which happens when the next significant SNP lies one window or more beyond the
 previous one. The block then closes one window downstream of its last
 significant SNP, mirroring its start, and the next significant SNP opens a new
-block. The pass ends at the last position.
-
-This refill-at-every-significant-SNP rule is `reset_on = "any"`, the default.
-With `reset_on = "best"`, only a SNP more significant than the block's current
-representative refills the budget, so a block can close while significant SNPs
-continue.
+block. The result is the union of the ±window intervals around all significant
+SNPs.
 
 The representative of each block is its most significant SNP. Each block is
 padded by one window on both sides, so two adjacent blocks overlap whenever the
@@ -38,7 +34,7 @@ gap between the last significant SNP of one and the first significant SNP of the
 next is less than two windows. A final trim step moves the end of the earlier
 block back to the start of the next one. The result is contiguous, strictly
 non-overlapping blocks. A block is two windows wide only when it is isolated; a
-trimmed block is narrower. With a chromosome column the algorithm runs per
+trimmed block is narrower. With a chromosome column the merge runs per
 chromosome.
 
 ---
@@ -52,8 +48,8 @@ install.packages("devtools")
 devtools::install_github("Droideight/physmerge")
 ```
 
-The R package needs `data.table`, which `install_github()` pulls in; everything
-else is base R and `utils`.
+The R package needs `data.table` and `R.utils`, which `install_github()` pulls
+in; everything else is base R and `utils`.
 
 ### C executable, macOS
 
@@ -111,7 +107,8 @@ Point `PMDIR` at the `sas` directory of a clone and include the file:
 
 Two SAS-specific traps: a missing value compares below every number, and
 `BEST32.` does not read p-values far below 1e-300 reliably. If your p-values
-reach that range, merge on `LOG10_P` with `reward=max`.
+reach that range, merge on the `NEG_LOG10_P` column instead. Reading `.gz`
+files needs SAS 9.4M5 or later.
 
 ---
 
@@ -121,7 +118,7 @@ The repository ships a small example file. From the `cli` directory:
 
 ```bash
 cd example
-physmerge --input demo.glm.linear --format plink2
+physmerge --input demo.glm.linear
 ```
 
 From the top of the repository it is `cd cli/example` instead.
@@ -129,7 +126,7 @@ From the top of the repository it is `cd cli/example` instead.
 ```
 physmerge: TEST filter: kept 52 of 59 rows where TEST = 'ADD'.
 physmerge: 1 row(s) dropped (NA in position or value).
-physmerge: 51 SNPs -> 3 blocks (window=500000, sig_th=5e-08, reward=min, reset_on=any).
+physmerge: 51 SNPs -> 3 blocks (window=500000, sig_th=5e-08, reward=min).
 serial  CHROM  start    end      rps_BP   rps_ID    rps_P
 1       1      700000   1855000  1265000  rs100007  2.2e-14
 2       1      2300000  3300000  2800000  rs100029  1.4e-15
@@ -138,167 +135,167 @@ serial  CHROM  start    end      rps_BP   rps_ID    rps_P
 
 `./demo.sh` in that directory runs six variations on the same file.
 
-The equivalent in R:
+The same in R:
 
 ```r
 library(physmerge)
-d <- read_sumstat("demo.glm.linear", format = "plink2")
-b <- physical_merge(d$data, sig_th = 5e-8, window = 500000,
-                    reward = d$reward, chrom_col = "CHROM")
-b <- annotate_blocks(b, d$data)
-export_snp_list(b, "lead_snps.txt")
+d <- read_sumstat("demo.glm.linear")
+b <- physical_merge(d)
+b <- annotate_blocks(b, d)
+export_snp_list(b, file = "lead_snps.txt")
 ```
 
 And in SAS:
 
 ```sas
-%pm_read(path=demo.glm.linear, out=ss, format=plink2);
-%physmerge(data=ss, out=blocks, sig_th=5e-8, window=500000,
-           reward=&pm_reward,
-           chrom=&pm_chrom_var, pos=POSITION, value=VALUE, id=&pm_id_var);
+%pm_read(path=demo.glm.linear, out=ss);
+%physmerge(data=ss, out=blocks);
+%pm_annotate(blocks=blocks, data=ss, out=blocks_annot);
 %pm_export(blocks=blocks, file=lead_snps.txt);
 ```
 
+All three print the same progress messages and return the same three blocks.
+
 ---
 
-## 3. Output destination
+## 3. Output
 
-By default the block table is printed to the terminal (stdout) and nothing is
-written to disk. Progress messages go to stderr, so a redirect or a pipe carries
-the table only.
+The executable prints the block table to the terminal (stdout) and writes
+nothing to disk unless asked. Progress messages go to stderr, so a redirect or a
+pipe carries the table only. R returns a data frame and SAS a data set.
 
-To write files, name them yourself:
+| What | R | Command line | SAS |
+|---|---|---|---|
+| block table | the return value | `--out FILE`, or stdout | `out=` |
+| other original columns of each lead SNP | `annotate_blocks(b, d)` | `--annotate-full` | `%pm_annotate` |
+| lead SNP ids, one per line | `export_snp_list(b, file = )` | `--snp-list FILE` | `%pm_export(file=)` |
+| one id file per chromosome | `export_snp_list(b, dir = )` | `--snp-list-dir DIR` | `%pm_export(dir=)` |
 
-| Flag | What it writes |
-|---|---|
-| `--out FILE` | the block table (tab-separated, with a header) |
-| `--snp-list FILE` | one representative SNP id per line |
-| `--snp-list-dir DIR` | `snp_ch1.txt`, `snp_ch2.txt`, … one per chromosome |
+A per-chromosome directory holds `snp_ch1.txt`, `snp_ch2.txt`, … for the
+chromosomes that have blocks, and is created if it does not exist. The id is
+`rps_ID` when the input has an id column, otherwise `rps_BP`.
 
-The files are written where the flag points, so give a full path to keep them out
-of the current directory:
-
-```bash
-mkdir -p ~/physmerge_out
-physmerge --input gwas.glm.linear --format plink2 \
-  --out ~/physmerge_out/blocks.tsv \
-  --snp-list ~/physmerge_out/lead_snps.txt
-```
-
-To pipe instead of writing a file:
-
-```bash
-physmerge --input gwas.glm.linear --format plink2 --quiet | head
-```
-
-### Output columns
-
-In R, `read_sumstat()` reads and filters the file. `physical_merge()` returns
-one row per block: serial, chromosome, start, end, representative position and
-value. `annotate_blocks()` joins the original fields back to each
-representative, and `export_snp_list()` writes the representative SNP IDs as a
-flat file or a per-chromosome ZIP. The executable does all four steps in one
-call.
+### Block table columns
 
 | Column | Meaning |
 |---|---|
 | `serial` | block number, running across chromosomes |
 | `CHROM` | chromosome (present when the input has a chromosome column) |
 | `start` | block start in bp, one window upstream of the first significant SNP |
-| `end` | block end in bp; guaranteed not to reach into the next block |
+| `end` | block end in bp; never reaches into the next block |
 | `rps_BP` | position of the representative (most significant) SNP |
 | `rps_ID` | its id, when the input has an id column |
-| `rps_<VALUE>` | its p-value or statistic, named after the input column |
+| `rps_<VALUE>` | its value, named after the input column, e.g. `rps_P` or `rps_NEG_LOG10_P` |
 
-Blocks do not overlap; within a chromosome, `end[i] <= start[i+1]`.
+Blocks do not overlap; within a chromosome, `end[i] <= start[i+1]`. Adding the
+original columns appends every other column of the lead SNP's row, in file
+order; the chromosome, position, id and value columns are not repeated.
+
+Block ends are positions in base pairs, not clipped to any assembly, so the last
+block of a chromosome can end past the chromosome's length by up to one window.
 
 ---
 
 ## 4. Recipes
 
-For standard PLINK2 `.glm.*` output, use the `plink2` format. It keeps only
-`TEST=ADD` rows and drops rows with a missing p-value, so no pre-filtering is
-needed:
+For standard PLINK2 `.glm.*` output, nothing needs to be set. The `plink2`
+format reads `#CHROM`, `POS`, `ID` and `P`, keeps only `TEST = ADD` rows and
+drops rows with a missing p-value:
 
 ```bash
-physmerge --input gwas.glm.linear --format plink2 \
-  --sig-th 5e-8 --window 500000 \
-  --out blocks.tsv --snp-list lead_snps.txt
+physmerge --input gwas.glm.linear --out blocks.tsv --snp-list lead_snps.txt
 ```
 
-If the value column is `-log10(P)` rather than `P` (PLINK2 writes
-`NEG_LOG10_P` for some runs), point at the column, flip the direction, and
-convert the threshold (`-log10(5e-8) = 7.30103`):
+If PLINK2 was run with `--glm log10`, the p-values are in `NEG_LOG10_P`. Point
+at that column; the threshold and direction follow from its name:
 
 ```bash
-physmerge --input gwas.glm.logistic.hybrid --format plink2 \
-  --value-col NEG_LOG10_P --reward max --sig-th 7.30103 \
-  --out blocks.tsv
+physmerge --input gwas.glm.logistic.hybrid --value-col NEG_LOG10_P
 ```
 
-Leave the TEST filter on. `--no-test-filter` admits the DOMDEV and RECESSIVE
-rows as well, which can produce a block whose representative is not an additive
-test; use it only for a file that has no TEST column.
+For a dominant or recessive model, PLINK2 writes `DOM` or `REC` in the `TEST`
+column instead of `ADD`:
 
-For any other table, use `--format custom` and name the columns. The file can
-be space-, tab- or comma-separated; the separator is read from the header:
+```bash
+physmerge --input gwas.glm.linear --test-val DOM
+```
+
+For any other table, use `--format custom` and name the columns:
 
 ```bash
 physmerge --input sumstats.txt --format custom \
-  --chrom-col CHR --pos-col POS --id-col SNP --value-col P \
-  --sig-th 5e-8 --window 500000
+  --chrom-col CHR --pos-col BP --id-col SNP --value-col P
 ```
 
-Feed the lead SNPs straight into PLINK:
+To merge on a test statistic or any column whose name physmerge does not
+recognise, set the direction and the threshold yourself:
 
 ```bash
-plink2 --pfile your_data --extract lead_snps.txt --make-pgen --out lead_only
+physmerge --input sumstats.txt --format custom \
+  --chrom-col CHR --pos-col BP --value-col CHISQ --reward max --sig-th 29.7
+```
+
+Genotype data split by chromosome, as in UK Biobank, takes one id list per
+chromosome:
+
+```bash
+physmerge --input gwas.glm.linear --snp-list-dir lead_by_chrom
+plink2 --bgen ukb_imp_chr1_v3.bgen ref-first --sample ukb.sample \
+  --extract lead_by_chrom/snp_ch1.txt --make-pgen --out lead_chr1
 ```
 
 A larger window merges more. Where significant SNPs are dense and never more
-than one window apart, `--window 500000` chains the whole region into a single
-block; shrink the window for finer loci. In a chr22 HbA1c scan (1.25 million
-SNPs, 2,550 of them genome-wide significant), 500 kb returned 1 block and 25 kb
-returned 542.
+than one window apart, the default 500 kb window chains the whole region into a
+single block; shrink the window for finer loci. In a chr22 HbA1c scan (1.25
+million SNPs, 2,550 of them genome-wide significant), 500 kb returned 1 block
+and 25 kb returned 542.
 
 ---
 
 ## 5. Options
 
-| R argument | Command-line flag |
-|---|---|
-| `read_sumstat(path, format=)` | `--input`, `--format plink2\|gpcm\|custom` |
-| `chrom_col`, `pos_col`, `id_col`, `value_col` | `--chrom-col`, `--pos-col`, `--id-col`, `--value-col` |
-| `test_filter`, `test_col`, `test_val` | `--test-filter` / `--no-test-filter`, `--test-col`, `--test-val` |
-| `chrom = c(1, 2)` | `--chrom 1,2` |
-| `sig_th` | `--sig-th 5e-8` |
-| `window` | `--window 500000` |
-| `reward = "min"` / `"max"` | `--reward min\|max` |
-| `reset_on = "any"` (default) / `"best"` | `--reset-on any\|best` |
-| `annotate_blocks()` | the executable always adds the lead SNP id; `--annotate-full` appends every original column |
-| `export_snp_list()` | `--snp-list FILE`, `--snp-list-dir DIR` |
+| R | Command line | SAS | Default |
+|---|---|---|---|
+| `read_sumstat(path)` | `--input FILE` | `%pm_read(path=)` | |
+| `format` | `--format` | `format=` | `plink2`; or `custom` |
+| `chrom_col` | `--chrom-col` | `chrom_col=` | plink2: `#CHROM`; `NA` ignores it |
+| `pos_col` | `--pos-col` | `pos_col=` | plink2: `POS` |
+| `id_col` | `--id-col` | `id_col=` | plink2: `ID`; `NA` for none |
+| `value_col` | `--value-col` | `value_col=` | plink2: `P` |
+| `test_val` | `--test-val` | `test_val=` | `ADD` (plink2 only) |
+| `chrom = c(1, 2)` | `--chrom 1,2` | `chrom=1 2` | all chromosomes |
+| `sep` | `--sep` | `sep=` | read from the header |
+| `physical_merge(sig_th = )` | `--sig-th` | `%physmerge(sig_th=)` | from the value column |
+| `window` | `--window` | `window=` | `500000` |
+| `reward` | `--reward min\|max` | `reward=` | from the value column |
+| `sort` | `--sort` | `sort=1` | off |
+| `quiet` | `--quiet` | `quiet=1` | off |
 
-Other flags: `--sep` to force a separator, `--sort` for input that is not
-position-sorted, `--no-header`, `--quiet`, `--help`.
+Threshold and direction. When they are not given, the name of the value column
+decides. `P`, `PVAL`, `PVALUE`, `P_VALUE`, `P-VALUE` and any name starting with
+`P_` give `reward = min` and `sig_th = 5e-8`. `NEG_LOG10_P` and `LOG10_P` give
+`reward = max` and `sig_th = 7.30103`, which is -log10(5e-8). Any other column
+stops with a message asking for both. A T or Z statistic is not guessed, because
+its sign would hide strong negative effects.
 
-`--reset-on` controls how a block stays open. With `any`, the default, every
-significant SNP refills the window, which gives the union of the ±window
-intervals around all significant SNPs. With `best`, only a more significant SNP
-refills it. A long run of comparably significant SNPs is then cut roughly every
-window into contiguous pieces. Use `any` when such a region should come out as
-one block.
+Separator. `sep` takes `tab`, `space` or a single character. When it is not
+given, the header decides: tab if it has a tab, otherwise comma, otherwise
+semicolon, otherwise whitespace.
 
-To merge a file as one sequence, pass `--no-chrom` on the command line, or
-`chrom_col = NA` to `read_sumstat()`. Both work whether or not the file has a
-chromosome column, and both ignore it when it is there.
+Chromosome. With `chrom_col` set to `NA`, the chromosome column is ignored and
+the whole file is merged as one sequence.
 
-Input may be plain text, gzip (`.gz`), or `-` for stdin. A file that is not
-position-sorted within a chromosome is rejected by the executable with a message
-instead of being merged wrongly; add `--sort` in that case. `read_sumstat()`
-sorts on read, so the R path needs nothing.
+Sorting. Input must be sorted by position within each chromosome, with each
+chromosome in one stretch, as PLINK2 writes it. Otherwise all three stop with a
+message such as `input is not position-sorted (chromosome 1: 2988324 after
+2997970)`. With `sort` on, the input is sorted first; the executable then holds
+the whole file in memory instead of streaming it.
 
-Block ends are positions in base pairs, not clipped to any assembly, so the last
-block of a chromosome can end past the chromosome's length by up to one window.
+TEST filter. If no row has the requested `TEST` value, all three stop and list
+the values the file does have, for example `TEST values in this file: DOM, sex`.
+
+Input may be plain text or gzip (`.gz`); the executable also reads `-` as stdin.
+`quiet` hides the progress lines; warnings and errors are always shown.
 
 ---
 

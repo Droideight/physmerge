@@ -1,11 +1,11 @@
 Package: physmerge
 Title: Physical Locus Merging for GWAS Summary Statistics
-Version: 0.4.0
+Version: 0.5.0
 Authors@R: person("Pin", role = c("aut", "cre"), email = "your@email.com")
 Description: Collapses overlapping genomic signals into non-overlapping locus
     blocks using a forward sliding-window approach, without requiring an LD
-    reference panel. Supports p-values and test statistics, REML-GPCM
-    per-SNP output, and standard PLINK2 summary statistics. The repository
+    reference panel. Reads standard PLINK2 summary statistics or any other
+    table of p-values or -log10 p-values. The repository
     also carries a standalone C command-line tool and a Base SAS port that
     return the same blocks.
 License: MIT + file LICENSE
@@ -14,6 +14,7 @@ Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Imports:
     data.table,
+    R.utils,
     utils
 Suggests:
     shiny,

@@ -1,83 +1,48 @@
-.is_significant <- function(val, sig_th, reward) {
-  if (reward == "min") val < sig_th else val > sig_th
-}
-
-.is_more_significant <- function(val, best, reward) {
-  if (reward == "min") val < best else val > best
-}
-
 #' Physical locus merging
 #'
-#' Scans a position-sorted genomic data frame and collapses nearby significant
-#' signals into non-overlapping locus blocks using a forward sliding-window
-#' approach. No LD reference panel is required.
+#' Scans position-sorted summary statistics and collapses nearby significant
+#' SNPs into contiguous, strictly non-overlapping locus blocks. No LD reference
+#' panel is required.
 #'
 #' @details
-#' The algorithm works in three passes:
+#' A block opens at the first significant SNP, one window upstream of it. The
+#' block carries a window-sized budget that the distance travelled spends, and
+#' every significant SNP refills it, which gives the union of the
+#' \eqn{\pm}\code{window} intervals around all significant SNPs. When the
+#' budget runs out, the
+#' block closes one window downstream of its last significant SNP. Blocks whose
+#' representatives lie less than one window apart are then merged, and the end
+#' of each block is trimmed back to the start of the next one. With a
+#' \code{chrom} column the merge runs per chromosome, in order of first
+#' appearance.
 #'
-#' \enumerate{
-#' \item \strong{Forward scan}: opens a block when a significant SNP is
-#' encountered and keeps it alive as long as the window has not been
-#' exhausted. The behaviour when a significant (but not necessarily more
-#' significant) SNP is found inside the block is controlled by
-#' \code{reset_on}:
-#' \describe{
-#' \item{\code{"any"} (default)}{Steps reset whenever \emph{any}
-#' significant SNP is found, regardless of its value. This is
-#' equivalent to taking the union of \eqn{\pm}\code{window} intervals
-#' around every significant SNP (i.e. locusDefiner-style logic).}
-#' \item{\code{"best"}}{Steps reset only when a \emph{more} significant
-#' SNP is found. The representative SNP is always the local maximum. A long
-#' run of comparably significant SNPs is split roughly every \code{window}
-#' bp.}
-#' }
-#' \item \strong{Collapse pass}: merges adjacent blocks whose representative
-#' SNPs (\code{rps_BP}) are fewer than \code{window} bp apart, retaining
-#' the more significant representative.
-#' \item \strong{Trim pass}: if after collapsing any block's \code{end}
-#' still overlaps the next block's \code{start}, the \code{end} is trimmed
-#' to \code{start} of the next block, guaranteeing zero overlap.
-#' }
+#' The reward direction and the threshold follow the name of the column the
+#' values came from, when \code{reward} or \code{sig_th} is not given:
+#' \code{P}, \code{PVAL}, \code{PVALUE}, \code{P_VALUE}, \code{P-VALUE} and any
+#' name starting with \code{P_} give \code{"min"} and \code{5e-8};
+#' \code{NEG_LOG10_P} and \code{LOG10_P} give \code{"max"} and
+#' \code{-log10(5e-8)}. Any other column needs both set by hand.
 #'
-#' When the input contains multiple chromosomes (detected via \code{chrom_col}
-#' or an existing \code{CHROM} column), the algorithm is run independently per
-#' chromosome to prevent cross-boundary merges.
+#' @param data A data frame with numeric columns \code{position} and
+#' \code{value}, and optionally \code{chrom} and \code{id}, as returned by
+#' \code{\link{read_sumstat}}.
+#' @param sig_th Significance threshold. \code{NULL} sets it from the value
+#' column's name.
+#' @param window Window size in base pairs. Default 500000.
+#' @param reward \code{"min"} when smaller values are more significant
+#' (p-values), \code{"max"} when larger ones are. \code{NULL} sets it from the
+#' value column's name.
+#' @param sort \code{FALSE} (default) stops on input that is not
+#' position-sorted within each chromosome. \code{TRUE} sorts it first.
+#' @param quiet \code{TRUE} hides progress messages. Warnings and errors are
+#' still shown.
 #'
-#' @param data A data frame with (at least) two numeric columns:
-#' \describe{
-#' \item{\code{position}}{Base-pair coordinate, resorted internally.}
-#' \item{\code{value}}{Test statistic or p-value.}
-#' }
-#' @param sig_th Significance threshold (length-1 numeric).
-#' @param window Window size in base-pairs (positive numeric).
-#' @param reward \code{"min"} (default) for p-values; \code{"max"} for
-#' test statistics.
-#' @param reset_on \code{"any"} (default): steps reset whenever any
-#' significant SNP is encountered inside the current block, equivalent to
-#' the union-of-intervals logic used by locusDefiner. \code{"best"}: steps
-#' reset only when a more significant SNP is encountered.
-#' @param chrom_col Name of the chromosome column in \code{data}. If
-#' \code{NULL} (default), the function auto-detects a column named
-#' \code{"CHROM"}. When a chromosome column is found and contains more
-#' than one unique value, the algorithm runs per chromosome.
-#'
-#' @return A data frame with one row per merged locus block:
-#' \describe{
-#' \item{\code{serial}}{Sequential block index (1, 2, 3, …).}
-#' \item{\code{CHROM}}{Chromosome (present when a chromosome column is
-#' detected).}
-#' \item{\code{start}}{Block start in bp.}
-#' \item{\code{end}}{Block end in bp.}
-#' \item{\code{rps_BP}}{Position of the most significant representative SNP.}
-#' \item{\code{rps_value}}{Value of the representative SNP.}
-#' }
-#'
-#' The returned data frame additionally carries an attribute
-#' \code{"rps_row"}: the row index in \code{data} of each representative SNP.
-#' \code{\link{annotate_blocks}} uses it to recover the exact input row, which
-#' is the only reliable way to label a block when several variants share one
-#' base-pair position (multi-allelic sites). The attribute is not a column and
-#' does not change the visible output.
+#' @return A data frame with one row per block: \code{serial}, \code{CHROM}
+#' (when \code{data} has a \code{chrom} column), \code{start}, \code{end},
+#' \code{rps_BP}, \code{rps_ID} (when \code{data} has an \code{id} column) and
+#' the representative's value, named \code{rps_} followed by the name of the
+#' value column, e.g. \code{rps_P}. The attribute \code{"rps_row"} holds the
+#' row of \code{data} each representative came from.
 #'
 #' @export
 #'
@@ -86,237 +51,176 @@
 #' position = c(100, 200, 350, 5000, 5100, 5200, 9000),
 #' value = c(0.04, 0.001, 0.03, 0.5, 0.02, 0.008, 0.04)
 #' )
-#' # default: reset on any significant SNP
 #' physical_merge(df, sig_th = 0.05, window = 500, reward = "min")
-#'
-#' # reset only when a more significant SNP appears
-#' physical_merge(df, sig_th = 0.05, window = 500, reward = "min",
-#' reset_on = "best")
-physical_merge <- function(data, sig_th, window, reward = "min",
-                           reset_on = "any", chrom_col = NULL) {
+physical_merge <- function(data, sig_th = NULL, window = 500000, reward = NULL,
+                           sort = FALSE, quiet = FALSE) {
+
+  say <- function(...) if (!quiet) message("physmerge: ", ...)
 
   if (!is.data.frame(data))
-    stop("`data` must be a data frame.")
+    stop("`data` must be a data frame.", call. = FALSE)
   if (!all(c("position", "value") %in% names(data)))
-    stop("`data` must contain columns named 'position' and 'value'.")
+    stop("`data` must contain columns named 'position' and 'value'.", call. = FALSE)
   if (!is.numeric(data$position) || !is.numeric(data$value))
-    stop("Both 'position' and 'value' columns must be numeric.")
-  if (!reward %in% c("min", "max"))
-    stop("`reward` must be either 'min' or 'max'.")
-  if (length(sig_th) != 1L || !is.numeric(sig_th) || is.na(sig_th))
-    stop("`sig_th` must be a single numeric value.")
-  if (length(window) != 1L || !is.numeric(window) || window <= 0)
-    stop("`window` must be a single positive numeric value.")
-  if (!reset_on %in% c("best", "any"))
-    stop("`reset_on` must be either 'best' or 'any'.")
+    stop("Both 'position' and 'value' columns must be numeric.", call. = FALSE)
+  if (length(window) != 1L || !is.numeric(window) || is.na(window) || window <= 0)
+    stop("`window` must be a single positive numeric value.", call. = FALSE)
 
-  chcol <- if (!is.null(chrom_col)) {
-    if (!chrom_col %in% names(data))
-      stop("chrom_col '", chrom_col, "' not found in data.")
-    chrom_col
-  } else if ("CHROM" %in% names(data)) {
-    "CHROM"
-  } else {
-    NULL
-  }
+  vname <- .pm_vname(data)
+  kind <- .pm_kind(vname)
+  if ((is.null(reward) || is.null(sig_th)) && kind == "other")
+    stop(sprintf("cannot tell whether a larger or a smaller %s is more significant; set reward and sig_th.",
+                 vname), call. = FALSE)
+  if (is.null(reward)) reward <- if (kind == "p") "min" else "max"
+  if (is.null(sig_th)) sig_th <- if (kind == "p") 5e-8 else -log10(5e-8)
+  if (!identical(reward, "min") && !identical(reward, "max"))
+    stop("`reward` must be either 'min' or 'max'.", call. = FALSE)
+  if (length(sig_th) != 1L || !is.numeric(sig_th) || is.na(sig_th))
+    stop("`sig_th` must be a single numeric value.", call. = FALSE)
+
+  hasch <- "chrom" %in% names(data)
+  hasid <- "id" %in% names(data)
+  vcol <- paste0("rps_", vname)
 
   keep <- !is.na(data$position) & !is.na(data$value)
-  if (!is.null(chcol)) keep <- keep & !is.na(data[[chcol]])
-  if (any(!keep)) {
-    message(sum(!keep), " row(s) dropped (NA in position, value",
-            if (!is.null(chcol)) " or chromosome", ").")
-    data <- data[keep, , drop = FALSE]
-  }
-  oidx <- which(keep)
+  if (any(!keep)) say(sum(!keep), " row(s) dropped (NA in position or value).")
+  rows <- which(keep)
+  pos <- data$position[rows]
+  val <- data$value[rows]
+  ch <- if (hasch) as.character(data$chrom[rows]) else rep("", length(rows))
+  ch[is.na(ch)] <- ""
+  n <- length(rows)
 
-  if (nrow(data) == 0L) {
-    empty <- data.frame(serial = integer(0), start = numeric(0), end = numeric(0),
-                        rps_BP = numeric(0), rps_value = numeric(0),
-                        rps_row = integer(0))
-    if (!is.null(chcol))
-      empty <- cbind(empty[, "serial", drop = FALSE], CHROM = character(0),
-                     empty[, setdiff(names(empty), "serial"), drop = FALSE])
-    return(.stash_rps_row(empty))
-  }
+  if (n && any(pos < 0))
+    warning("physmerge: negative position(s) found; block boundaries are clamped at 0.",
+            call. = FALSE)
+  if (n && !hasch && diff(range(pos)) > 2.5e8)
+    warning("physmerge: positions span more than 250 Mb but there is no chromosome ",
+            "column; blocks may cross chromosome boundaries.", call. = FALSE)
 
-  if (any(data$position < 0))
-    warning("Negative position(s) found.  Block boundaries are clamped at 0, ",
-            "so a block that starts below 0 has no width.")
-
-  if (!is.null(chcol)) {
-    chroms <- unique(data[[chcol]])
-    if (length(chroms) > 1L) {
-      res <- lapply(chroms, function(ch) {
-        sel <- which(data[[chcol]] == ch)
-        sub <- data[sel, ]
-        blk <- .physical_merge_single(sub, sig_th, window, reward, reset_on)
-        if (nrow(blk) == 0L) return(blk)
-        blk$rps_row <- sel[blk$rps_row]
-        blk$CHROM <- ch
-        blk
-      })
-      out <- do.call(rbind, res)
-      if (is.null(out) || nrow(out) == 0L) {
-        return(.stash_rps_row(data.frame(serial = integer(0), CHROM = character(0),
-                                         start = numeric(0), end = numeric(0),
-                                         rps_BP = numeric(0), rps_value = numeric(0),
-                                         rps_row = integer(0))))
-      }
-      out$serial <- seq_len(nrow(out))
-      rownames(out) <- NULL
-      cord <- c("serial", "CHROM",
-                         setdiff(names(out), c("serial", "CHROM")))
-      return(.stash_rps_row(.remap_rps_row(out[, cord], oidx)))
-    }
-  } else {
-    rng <- diff(range(data$position))
-    if (rng > 2.5e8)
-      warning("Position range > 250 Mb detected but no chromosome column found. ",
-              "If data spans multiple chromosomes, SNPs near chromosome ",
-              "boundaries may be incorrectly merged into the same block. ",
-              "Add a CHROM column or filter to one chromosome at a time.")
-  }
-
-  .stash_rps_row(.remap_rps_row(
-    .physical_merge_single(data, sig_th, window, reward, reset_on), oidx))
-}
-
-.remap_rps_row <- function(blk, idx) {
-  if (!is.null(blk$rps_row) && length(blk$rps_row))
-    blk$rps_row <- idx[blk$rps_row]
-  blk
-}
-
-.stash_rps_row <- function(blk) {
-  rr <- blk$rps_row
-  blk$rps_row <- NULL
-  attr(blk, "rps_row") <- if (is.null(rr)) integer(0) else as.integer(rr)
-  blk
-}
-
-.physical_merge_single <- function(data, sig_th, window, reward, reset_on) {
-
-  ord <- order(data$position)
-  data <- data[ord, ]
-  n <- nrow(data)
-
-  empt <- data.frame(
-    serial = integer(0), start = numeric(0), end = numeric(0),
-    rps_BP = numeric(0), rps_value = numeric(0), rps_row = integer(0)
-  )
-  if (n == 0L) return(empt)
-
-  oser <- integer(n); ostart <- numeric(n)
-  oend <- numeric(n); obp <- numeric(n)
-  oval <- numeric(n); orow <- integer(n)
-  nblk <- 0L
-
-  inblk <- FALSE
-  steps <- window
-  best <- sig_th
-  lpos <- data$position[1L]
-
-  openb <- function(pos, val, i) {
-    nblk <<- nblk + 1L
-    oser[nblk] <<- nblk
-    ostart[nblk] <<- max(0, pos - window)
-    oend[nblk] <<- NA_real_
-    obp[nblk] <<- pos
-    oval[nblk] <<- val
-    orow[nblk] <<- ord[i]
-    inblk <<- TRUE
-    steps <<- window
-    best <<- val
-  }
-
-  closeb <- function(lastp) {
-    oend[nblk] <<- lastp + steps
-    inblk <<- FALSE
-    steps <<- window
-    best <<- sig_th
-  }
-
-  for (i in seq_len(n)) {
-    pos <- data$position[i]
-    val <- data$value[i]
-
-    if (!inblk) {
-      if (.is_significant(val, sig_th, reward)) openb(pos, val, i)
-
+  if (n > 1L) {
+    if (sort) {
+      o <- order(match(ch, unique(ch)), pos)
+      rows <- rows[o]; pos <- pos[o]; val <- val[o]; ch <- ch[o]
     } else {
-      rem <- steps - (pos - lpos)
+      same <- c(FALSE, ch[-1L] == ch[-n])
+      back <- same & c(FALSE, diff(pos) < 0)
+      again <- !same & duplicated(ch)
+      bad <- which(back | again)
+      if (length(bad)) {
+        i <- bad[1L]
+        if (again[i])
+          stop(sprintf("chromosome %s appears in more than one stretch of the input; set sort to merge it anyway.",
+                       ch[i]), call. = FALSE)
+        if (hasch)
+          stop(sprintf("input is not position-sorted (chromosome %s: %.0f after %.0f); set sort to merge it anyway.",
+                       ch[i], pos[i], pos[i - 1L]), call. = FALSE)
+        stop(sprintf("input is not position-sorted (%.0f after %.0f); set sort to merge it anyway.",
+                     pos[i], pos[i - 1L]), call. = FALSE)
+      }
+    }
+  }
 
+  rmax <- reward == "max"
+  parts <- lapply(unique(ch), function(cc) {
+    sel <- which(ch == cc)
+    b <- .pm_merge1(pos[sel], val[sel], sig_th, window, rmax)
+    b$k <- sel[b$k]
+    b$chrom <- rep(cc, length(b$k))
+    b
+  })
+  start <- unlist(lapply(parts, `[[`, "start"))
+  end <- unlist(lapply(parts, `[[`, "end"))
+  bp <- unlist(lapply(parts, `[[`, "bp"))
+  bv <- unlist(lapply(parts, `[[`, "val"))
+  k <- unlist(lapply(parts, `[[`, "k"))
+  bch <- unlist(lapply(parts, `[[`, "chrom"))
+  if (is.null(k)) {
+    start <- end <- bp <- bv <- numeric(0); k <- integer(0); bch <- character(0)
+  }
+
+  out <- data.frame(serial = seq_along(k), stringsAsFactors = FALSE)
+  if (hasch) out$CHROM <- bch
+  out$start <- start
+  out$end <- end
+  out$rps_BP <- bp
+  if (hasid) out$rps_ID <- as.character(data$id[rows[k]])
+  out[[vcol]] <- bv
+  attr(out, "rps_row") <- as.integer(rows[k])
+
+  say(sprintf("%d SNPs -> %d blocks (window=%.0f, sig_th=%g, reward=%s).",
+              n, nrow(out), window, sig_th, reward))
+  out
+}
+
+.pm_merge1 <- function(pos, val, sig, w, rmax) {
+  issig <- if (rmax) function(v) v > sig else function(v) v < sig
+  better <- if (rmax) function(v, b) v > b else function(v, b) v < b
+  n <- length(pos)
+  s <- e <- p <- v <- numeric(n); k <- integer(n); nb <- 0L
+  inblk <- FALSE; steps <- w; best <- sig; lpos <- if (n) pos[1L] else 0
+  for (i in seq_len(n)) {
+    x <- pos[i]; y <- val[i]
+    if (inblk) {
+      rem <- steps - (x - lpos)
       if (rem <= 0) {
-        closeb(lpos)
-        if (.is_significant(val, sig_th, reward)) openb(pos, val, i)
-
+        e[nb] <- lpos + steps
+        inblk <- FALSE
       } else {
         steps <- rem
-
-        if (reset_on == "any" && .is_significant(val, sig_th, reward)) {
-          steps <- window
-          if (.is_more_significant(val, best, reward)) {
-            best <- val
-            obp[nblk] <- pos
-            oval[nblk] <- val
-            orow[nblk] <- ord[i]
-          }
-
-        } else if (.is_more_significant(val, best, reward)) {
-          best <- val
-          steps <- window
-          obp[nblk] <- pos
-          oval[nblk] <- val
-          orow[nblk] <- ord[i]
+        if (issig(y)) {
+          steps <- w
+          if (better(y, best)) { best <- y; p[nb] <- x; v[nb] <- y; k[nb] <- i }
         }
       }
     }
-    lpos <- pos
-  }
-  if (inblk) closeb(lpos)
-  if (nblk == 0L) return(empt)
-
-  raw <- data.frame(
-    serial = oser[seq_len(nblk)],
-    start = ostart[seq_len(nblk)],
-    end = oend[seq_len(nblk)],
-    rps_BP = obp[seq_len(nblk)],
-    rps_value = oval[seq_len(nblk)],
-    rps_row = orow[seq_len(nblk)],
-    stringsAsFactors = FALSE
-  )
-
-  blk <- .collapse_blocks(raw, window, reward)
-
-  if (nrow(blk) > 1L) {
-    for (i in seq_len(nrow(blk) - 1L)) {
-      if (blk$end[i] > blk$start[i + 1L])
-        blk$end[i] <- blk$start[i + 1L]
+    if (!inblk && issig(y)) {
+      nb <- nb + 1L
+      s[nb] <- max(0, x - w); p[nb] <- x; v[nb] <- y; k[nb] <- i
+      inblk <- TRUE; steps <- w; best <- y
     }
+    lpos <- x
   }
+  if (inblk) e[nb] <- lpos + steps
+  s <- s[seq_len(nb)]; e <- e[seq_len(nb)]; p <- p[seq_len(nb)]
+  v <- v[seq_len(nb)]; k <- k[seq_len(nb)]
 
-  blk$end <- pmax(blk$end, blk$start)
-  blk
+  if (nb > 1L) {
+    keep <- 1L
+    for (i in 2:nb) {
+      j <- keep[length(keep)]
+      if (p[i] - p[j] < w) {
+        e[j] <- max(e[j], e[i])
+        if (better(v[i], v[j])) { p[j] <- p[i]; v[j] <- v[i]; k[j] <- k[i] }
+      } else {
+        keep <- c(keep, i)
+      }
+    }
+    s <- s[keep]; e <- e[keep]; p <- p[keep]; v <- v[keep]; k <- k[keep]
+    m <- length(s)
+    if (m > 1L) e[-m] <- pmin(e[-m], s[-1L])
+  }
+  e <- pmax(e, s)
+  list(start = s, end = e, bp = p, val = v, k = k)
 }
 
-.collapse_blocks <- function(blk, w, reward) {
-  if (nrow(blk) <= 1L) return(blk)
-  out <- blk[1L, ]
-  for (i in seq(2L, nrow(blk))) {
-    cur <- blk[i, ]
-    if ((cur$rps_BP - out$rps_BP[nrow(out)]) < w) {
-      last <- nrow(out)
-      out$end[last] <- max(out$end[last], cur$end)
-      if (.is_more_significant(cur$rps_value, out$rps_value[last], reward)) {
-        out$rps_BP[last] <- cur$rps_BP
-        out$rps_value[last] <- cur$rps_value
-        out$rps_row[last] <- cur$rps_row
-      }
-    } else {
-      out <- rbind(out, cur)
-    }
+.pm_vname <- function(data) {
+  pc <- attr(data, "pm_cols")
+  if (!is.null(pc) && !is.na(pc[["value"]])) return(pc[["value"]])
+  v <- as.numeric(data$value)
+  for (nm in setdiff(names(data), c("position", "value", "chrom", "id"))) {
+    x <- data[[nm]]
+    if (is.numeric(x) && identical(as.numeric(x), v)) return(nm)
   }
-  out$serial <- seq_len(nrow(out))
-  rownames(out) <- NULL
-  out
+  "value"
+}
+
+.pm_kind <- function(name) {
+  u <- toupper(name)
+  if (u %in% c("P", "PVAL", "PVALUE", "P_VALUE", "P-VALUE") || startsWith(u, "P_"))
+    "p"
+  else if (u %in% c("NEG_LOG10_P", "LOG10_P"))
+    "logp"
+  else
+    "other"
 }

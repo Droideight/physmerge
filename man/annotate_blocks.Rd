@@ -2,74 +2,28 @@
 % Please edit documentation in R/export.R
 \name{annotate_blocks}
 \alias{annotate_blocks}
-\title{Annotate merged blocks with full rows from the original input}
+\title{Add the original columns of each representative SNP}
 \usage{
-annotate_blocks(
-  blocks,
-  data,
-  chrom_col = NULL,
-  id_col = NULL,
-  keep_serial = TRUE,
-  keep_start = TRUE,
-  keep_end = TRUE,
-  keep_rps_BP = TRUE,
-  keep_rps_value = TRUE,
-  keep_rps_ID = TRUE
-)
+annotate_blocks(blocks, data)
 }
 \arguments{
 \item{blocks}{Data frame returned by \code{\link{physical_merge}}.}
 
-\item{data}{The data frame that was passed to \code{\link{physical_merge}},
-usually the \code{data} element returned by \code{\link{read_sumstat}}.
-Must contain a \code{position} column.}
-
-\item{chrom_col}{Name of the chromosome column in \code{data}. If
-\code{NULL} (default), auto-detects \code{"CHROM"} then \code{"#CHROM"}.}
-
-\item{id_col}{Name of the SNP ID column in \code{data} used to populate
-\code{rps_ID}. If \code{NULL} (default), auto-detects \code{"ID"} then
-\code{"SNP"}. Set to \code{NA} to skip.}
-
-\item{keep_serial}{Logical. Include \code{serial} column. Default \code{TRUE}.}
-
-\item{keep_start}{Logical. Include \code{start} column. Default \code{TRUE}.}
-
-\item{keep_end}{Logical. Include \code{end} column. Default \code{TRUE}.}
-
-\item{keep_rps_BP}{Logical. Include \code{rps_BP} column. Default \code{TRUE}.}
-
-\item{keep_rps_value}{Logical. Include \code{rps_value} column. Default \code{TRUE}.}
-
-\item{keep_rps_ID}{Logical. Include \code{rps_ID} column (when available).
-Default \code{TRUE}.}
+\item{data}{The data frame that was passed to \code{\link{physical_merge}}.}
 }
 \value{
-The \code{blocks} data frame merged with full original columns for
-each representative SNP row, with block metadata columns selectively
-retained based on \code{keep_*} arguments.
+\code{blocks} with the representative's remaining original columns
+appended, in the order of the input file.
 }
 \description{
-Returns one row per block containing all original columns for the
-representative SNP. When \code{blocks} still carries the \code{"rps_row"}
-attribute set by \code{\link{physical_merge}}, the representative row is
-taken directly by index, so blocks at multi-allelic sites are labelled with
-the variant that actually led the block. Otherwise the function falls back
-to joining on \code{CHROM} and \code{rps_BP}, which can only keep the first
-row at a duplicated position. Block metadata columns (\code{serial},
-\code{start}, \code{end}, \code{rps_BP}, \code{rps_value}) can be
-individually included or dropped.
+Appends to each block the original columns of its representative SNP. The
+columns the block table already shows (chromosome, position, id and value)
+are not repeated.
 }
 \examples{
 \dontrun{
-df <- read_sumstat("my_gwas.glm.linear", format = "plink2")
-blocks <- physical_merge(df$data, sig_th = 5e-8, window = 500000)
-
-# Keep all block metadata (default)
-annotate_blocks(blocks, df$data)
-
-# Drop start/end/rps_value — only keep serial, rps_BP, rps_ID + original cols
-annotate_blocks(blocks, df$data,
-keep_start = FALSE, keep_end = FALSE, keep_rps_value = FALSE)
+d <- read_sumstat("my_gwas.glm.linear")
+b <- annotate_blocks(physical_merge(d), d)
+b[, c("CHROM", "start", "end", "rps_ID", "BETA", "SE")]
 }
 }

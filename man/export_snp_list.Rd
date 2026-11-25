@@ -2,39 +2,33 @@
 % Please edit documentation in R/export.R
 \name{export_snp_list}
 \alias{export_snp_list}
-\title{Export a SNP ID list from merged blocks}
+\title{Write the representative SNP ids to a file}
 \usage{
-export_snp_list(blocks, path, by_chrom = FALSE, id_col = NULL)
+export_snp_list(blocks, file = NULL, dir = NULL, quiet = FALSE)
 }
 \arguments{
-\item{blocks}{Data frame returned by \code{\link{annotate_blocks}}.
-Should contain \code{rps_ID} (added by \code{annotate_blocks}) or at
-least \code{rps_BP}.}
+\item{blocks}{Data frame returned by \code{\link{physical_merge}} or
+\code{\link{annotate_blocks}}.}
 
-\item{path}{Output file path.
-\itemize{
-\item \code{by_chrom = FALSE}: path to a \code{.txt} file.
-\item \code{by_chrom = TRUE}: path to a \code{.zip} archive.
-}}
+\item{file}{Path of a single output file.}
 
-\item{by_chrom}{Logical. \code{FALSE} (default) writes a single merged
-file; \code{TRUE} writes one file per chromosome bundled in a ZIP.
-Requires a \code{CHROM} column in \code{blocks}.}
+\item{dir}{Directory for one file per chromosome.}
 
-\item{id_col}{Name of the ID column to write. Defaults to \code{"rps_ID"}
-if present, otherwise \code{"rps_BP"}.}
+\item{quiet}{\code{TRUE} hides progress messages. Warnings and errors are
+still shown.}
 }
 \value{
-Invisibly returns \code{path}.
+Invisibly, the path written.
 }
 \description{
-Writes the representative SNP IDs to one or more plain-text files (one ID
-per line). When \code{by_chrom = TRUE}, a separate file is written for
-each chromosome and bundled into a ZIP archive.
+Writes one id per line: \code{rps_ID} when the blocks have it, otherwise
+\code{rps_BP}. Give either \code{file} for a single list, or \code{dir} for
+one file per chromosome (\code{snp_ch1.txt}, \code{snp_ch2.txt}, ...). The
+directory is created if it does not exist.
 }
 \examples{
 \dontrun{
-export_snp_list(blocks, "snp_ids.txt")
-export_snp_list(blocks, "snp_ids_by_chr.zip", by_chrom = TRUE)
+export_snp_list(b, file = "lead_snps.txt")
+export_snp_list(b, dir = "lead_by_chrom")
 }
 }

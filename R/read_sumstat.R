@@ -1,173 +1,140 @@
-#' Read and prepare GWAS summary statistics for physical merging
+#' Read GWAS summary statistics for physical merging
 #'
-#' A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP
-#' output, and arbitrary tabular formats. Uses \code{data.table::fread} for
-#' fast, separator-agnostic reading; \pkg{data.table} is required.
+#' Reads a summary-statistics file and adds the role columns that
+#' \code{\link{physical_merge}} works on: \code{position} and \code{value},
+#' plus \code{chrom} and \code{id} when the file has them. All original
+#' columns are kept unchanged. Rows keep the order of the file.
 #'
-#' @param path Path to the file (.csv, .tsv, .txt, or compressed).
-#' @param format One of \code{"plink2"}, \code{"gpcm"}, or \code{"custom"}.
+#' @param path Path to the file. Plain text or gzip (\code{.gz}).
+#' @param format \code{"plink2"} (default) or \code{"custom"}.
 #' \describe{
-#' \item{\code{"plink2"}}{PLINK2 \code{.glm.*} output. Default columns:
-#' \code{#CHROM}, \code{POS}, \code{ID}, \code{P}.}
-#' \item{\code{"gpcm"}}{REML-GPCM per-SNP output. Default columns:
-#' \code{#CHROM}, \code{POS}, \code{ID}, \code{P_HPI}.}
-#' \item{\code{"custom"}}{Specify all column names manually via
-#' \code{chrom_col}, \code{pos_col}, \code{id_col}, \code{value_col}.}
+#' \item{\code{"plink2"}}{PLINK2 \code{.glm.*} output. Columns \code{#CHROM},
+#' \code{POS}, \code{ID} and \code{P}; only rows whose \code{TEST} is
+#' \code{test_val} are kept.}
+#' \item{\code{"custom"}}{Any other table. \code{pos_col}, \code{value_col}
+#' and \code{chrom_col} must be named.}
 #' }
-#' @param value_col Name of the column to use as the "value" when merging.
-#' Overrides the format default when supplied. Common choices: \code{"P"},
-#' \code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.
-#' @param chrom_col Chromosome column name. Overrides format default.
-#' Set to \code{NA} to ignore the chromosome column and merge the whole file
-#' as one sequence; a column named \code{CHROM} is then kept in the data
-#' under its PLINK name \code{#CHROM}, so \code{\link{physical_merge}} does
-#' not pick it up again.
-#' @param pos_col Position column name. Overrides format default.
-#' @param id_col SNP ID column name. Overrides format default.
-#' Set to \code{NA} if no ID column exists.
-#' @param test_filter Logical. If \code{TRUE} (default for
-#' \code{format = "plink2"}), filter rows by \code{test_col == test_val}
-#' before returning. Useful for multi-covariate PLINK2 output where each
-#' SNP appears once per TEST value.
-#' @param test_col Name of the TEST column. Default \code{"TEST"}.
-#' @param test_val Value to retain in \code{test_col}. Default \code{"ADD"}.
-#' @param chrom Optional character/integer vector of chromosomes to retain.
-#' \code{NULL} (default) keeps all.
-#' @param ... Additional arguments passed to \code{data.table::fread}
-#' (e.g. \code{nThread}, \code{skip}).
+#' @param chrom_col Chromosome column. \code{NA} ignores the chromosome
+#' column, so the whole file is merged as one sequence.
+#' @param pos_col Position column.
+#' @param id_col SNP id column. \code{NA} for none.
+#' @param value_col Column holding the p-value or statistic.
+#' @param test_val For \code{format = "plink2"}, the \code{TEST} value to keep.
+#' Default \code{"ADD"}; \code{"DOM"} or \code{"REC"} for dominant or
+#' recessive models.
+#' @param chrom Chromosomes to keep, e.g. \code{c(1, 2)}. \code{NULL} keeps all.
+#' @param sep Field separator: \code{"tab"}, \code{"space"} or a single
+#' character. \code{NULL} reads it from the header: tab if the header has a
+#' tab, otherwise comma, otherwise semicolon, otherwise whitespace.
+#' @param quiet \code{TRUE} hides progress messages. Warnings and errors are
+#' still shown.
 #'
-#' @return A named list with two elements:
-#' \describe{
-#' \item{\code{data}}{The prepared data frame with all original columns plus
-#' \code{position} and \code{value} appended, sorted by position (within
-#' chromosome, in order of first appearance, when there is a chromosome
-#' column). Rows with \code{NA} in position or value are dropped. A
-#' \code{#CHROM} column is renamed \code{CHROM}; with \code{chrom_col = NA},
-#' a \code{CHROM} column is renamed \code{#CHROM} instead.}
-#' \item{\code{reward}}{Suggested reward direction for
-#' \code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
-#' test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
-#' }
+#' @return A data frame: the original columns, then \code{position},
+#' \code{value}, and \code{chrom} and \code{id} when present.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' # PLINK2 sumstats (TEST filter auto-enabled)
-#' out <- read_sumstat("my_gwas.glm.linear", format = "plink2")
-#' blocks <- physical_merge(out$data, sig_th = 5e-8, window = 500000,
-#' reward = out$reward)
-#' blocks <- annotate_blocks(blocks, out$data)
+#' d <- read_sumstat("my_gwas.glm.linear")
+#' b <- physical_merge(d)
 #'
-#' # REML-GPCM output
-#' out <- read_sumstat("stage1_ch1_P_HPI.csv", format = "gpcm",
-#' value_col = "P_HPI", chrom = 1)
-#'
-#' # Custom format
-#' out <- read_sumstat("results.txt", format = "custom",
-#' chrom_col = "CHR", pos_col = "BP",
-#' id_col = "SNP", value_col = "P")
+#' d <- read_sumstat("results.txt", format = "custom",
+#' chrom_col = "CHR", pos_col = "BP", id_col = "SNP", value_col = "P")
 #' }
 read_sumstat <- function(path,
-                         format = c("plink2", "gpcm", "custom"),
-                         value_col = NULL,
+                         format = c("plink2", "custom"),
                          chrom_col = NULL,
                          pos_col = NULL,
                          id_col = NULL,
-                         test_filter = NULL,
-                         test_col = "TEST",
+                         value_col = NULL,
                          test_val = "ADD",
                          chrom = NULL,
-                         ...) {
+                         sep = NULL,
+                         quiet = FALSE) {
 
   format <- match.arg(format)
+  say <- function(...) if (!quiet) message("physmerge: ", ...)
 
-  defaults <- list(
-    plink2 = list(chrom = "#CHROM", pos = "POS", id = "ID",
-                  value = "P", test_filter = TRUE),
-    gpcm = list(chrom = "#CHROM", pos = "POS", id = "ID",
-                  value = "P_HPI", test_filter = FALSE),
-    custom = list(chrom = NULL, pos = NULL, id = NULL,
-                  value = NULL, test_filter = FALSE)
-  )[[format]]
-
-  chrom_col <- chrom_col %||% defaults$chrom
-  pos_col <- pos_col %||% defaults$pos
-  id_col <- id_col %||% defaults$id
-  value_col <- value_col %||% defaults$value
-  test_filter <- test_filter %||% defaults$test_filter
-
+  if (format == "plink2") {
+    chrom_col <- chrom_col %||% "#CHROM"
+    pos_col <- pos_col %||% "POS"
+    id_col <- id_col %||% "ID"
+    value_col <- value_col %||% "P"
+  }
+  if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
+    stop("For format = 'custom', you must supply chrom_col, pos_col and ",
+         "value_col; set chrom_col = NA to ignore the chromosome column.",
+         call. = FALSE)
   if (is.null(id_col)) id_col <- NA_character_
 
-  if (is.null(chrom_col) || is.null(pos_col) || is.null(value_col))
-    stop("For format = 'custom', you must supply chrom_col, pos_col, and value_col; set chrom_col = NA to ignore the chromosome column.")
-
+  if (is.null(sep)) sep <- .pm_sep(path)
+  else if (identical(sep, "tab")) sep <- "\t"
+  else if (identical(sep, "space")) sep <- " "
   df <- tryCatch(
-    as.data.frame(data.table::fread(path, header = TRUE,
+    as.data.frame(data.table::fread(path, header = TRUE, sep = sep,
                                     stringsAsFactors = FALSE,
-                                    data.table = FALSE, ...)),
-    error = function(e) stop("Failed to read file: ", conditionMessage(e))
+                                    data.table = FALSE, check.names = FALSE)),
+    error = function(e) stop("Failed to read file: ", conditionMessage(e),
+                             call. = FALSE)
   )
 
-  if (is.na(chrom_col)) {
-    names(df)[names(df) == "CHROM"] <- "#CHROM"
-  } else {
-    names(df)[names(df) == "#CHROM"] <- "CHROM"
-    if (chrom_col == "#CHROM") chrom_col <- "CHROM"
-  }
-
-  needed <- c(pos_col, value_col)
-  if (!is.na(chrom_col)) needed <- c(chrom_col, needed)
-  if (!is.na(id_col)) needed <- c(needed, id_col)
+  needed <- c(if (!is.na(chrom_col)) chrom_col, pos_col, value_col,
+              if (!is.na(id_col)) id_col)
   missing <- setdiff(needed, names(df))
   if (length(missing) > 0L)
-    stop("Column(s) not found: ", paste(missing, collapse = ", "))
+    stop("Column(s) not found: ", paste(missing, collapse = ", "), call. = FALSE)
 
-  if (isTRUE(test_filter)) {
-    if (!test_col %in% names(df)) {
-      warning("test_col '", test_col, "' not found; TEST filter skipped.")
+  if (format == "plink2") {
+    if (!"TEST" %in% names(df)) {
+      warning("physmerge: TEST column not found; TEST filter skipped.",
+              call. = FALSE)
     } else {
+      tv <- as.character(df$TEST)
       n0 <- nrow(df)
-      df <- df[as.character(df[[test_col]]) == test_val, ]
-      message(sprintf("TEST filter: kept %d of %d rows where %s = '%s'.",
-                      nrow(df), n0, test_col, test_val))
-      if (nrow(df) == 0L)
-        stop("No rows remain after TEST filter.")
+      hit <- !is.na(tv) & tv == test_val
+      if (!any(hit))
+        stop(sprintf("no rows have TEST = '%s'; TEST values in this file: %s. Set test_val to one of them.",
+                     test_val, paste(head(unique(tv[!is.na(tv)]), 10), collapse = ", ")),
+             call. = FALSE)
+      df <- df[hit, , drop = FALSE]
+      say(sprintf("TEST filter: kept %d of %d rows where TEST = '%s'.",
+                  nrow(df), n0, test_val))
     }
   }
 
   if (!is.null(chrom) && !is.na(chrom_col)) {
-    df <- df[as.character(df[[chrom_col]]) %in% as.character(chrom), ]
-    if (nrow(df) == 0L) warning("No rows remain after chromosome filter.")
+    hit <- as.character(df[[chrom_col]]) %in% as.character(chrom)
+    if (any(!hit)) say(sum(!hit), " row(s) dropped by the chromosome filter.")
+    df <- df[hit, , drop = FALSE]
   }
 
   df$position <- suppressWarnings(as.numeric(df[[pos_col]]))
   df$value <- suppressWarnings(as.numeric(df[[value_col]]))
+  if (!is.na(chrom_col)) df$chrom <- as.character(df[[chrom_col]])
+  if (!is.na(id_col)) df$id <- as.character(df[[id_col]])
 
   ok <- !is.na(df$position) & !is.na(df$value)
-  if (any(!ok))
-    message(sum(!ok), " row(s) dropped (NA in position or value).")
-  df <- df[ok, ]
+  if (any(!ok)) say(sum(!ok), " row(s) dropped (NA in position or value).")
+  df <- df[ok, , drop = FALSE]
+  rownames(df) <- NULL
 
   if (nrow(df) == 0L)
-    stop("No usable rows after filtering.")
+    stop("No usable rows after filtering.", call. = FALSE)
+  attr(df, "pm_cols") <- c(chrom = chrom_col, pos = pos_col, id = id_col,
+                           value = value_col)
+  df
+}
 
-  df <- if (!is.na(chrom_col) && chrom_col %in% names(df)) {
-    ch <- as.character(df[[chrom_col]])
-    df[order(match(ch, unique(ch)), df$position), ]
-  } else {
-    df[order(df$position), ]
-  }
-
-  stats <- c("LOG10_P", "T_STAT", "Z_STAT", "CHISQ", "F_STAT",
-                 "T_STAT_Direct", "T_STAT_TE", "HPI")
-  sugg <- if (value_col %in% stats) "max" else "min"
-  if (value_col == "LOG10_P")
-    message("LOG10_P detected: consider reward = 'max' for physical_merge().")
-  list(
-    data = df,
-    reward = sugg
-  )
+.pm_sep <- function(path) {
+  con <- if (grepl("\\.gz$", path)) gzfile(path, "r") else file(path, "r")
+  on.exit(close(con))
+  h <- readLines(con, n = 1L, warn = FALSE)
+  if (!length(h)) stop("empty input file", call. = FALSE)
+  if (grepl("\t", h, fixed = TRUE)) "\t"
+  else if (grepl(",", h, fixed = TRUE)) ","
+  else if (grepl(";", h, fixed = TRUE)) ";"
+  else " "
 }
 
 `%||%` <- function(x, y) if (is.null(x)) y else x

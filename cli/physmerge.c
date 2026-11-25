@@ -7,6 +7,13 @@
 #include <math.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <ctype.h>
+#ifdef _WIN32
+# include <direct.h>
+# define pm_mkdir(p) _mkdir(p)
+#else
+# define pm_mkdir(p) mkdir(p, 0777)
+#endif
 #ifdef _MSC_VER
 # define strdup _strdup
 #endif
@@ -14,13 +21,20 @@
 #include <zlib.h>
 #endif
 
-#define PM_VERSION "0.4.0"
-#define PM_BUILD "c-cli-1"
+#define PM_VERSION "0.5.0"
+#define PM_BUILD ""
 
 static void die(const char *fmt, ...);
 
 static const char *g_out = NULL, *g_snp = NULL;
 static char g_snpf[4096] = {0};
+
+static void warn(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    fputs("physmerge: warning: ", stderr);
+    vfprintf(stderr, fmt, ap); fputc('\n', stderr);
+    va_end(ap);
+}
 
 static void die(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
@@ -200,12 +214,13 @@ typedef struct {
 
     double sig, window;
     int rmax;
-    int rany;
     int havech, haveid, annot;
     FILE *out, *snpf;
     char *snpdir;
     const char *vname;
     char *hdr;
+    char **sfn; int nsf;
+    char lastsf[4096];
 
     Sbuf chrom;
     int chset, inblk, hascur, hashld;
@@ -230,9 +245,12 @@ static void puthdr(Core *c) {
     c->hdr = NULL;
 }
 
+static void open_snpf(Core *c);
+
 static void emit(Core *c, Block *b) {
     char s1[64], s2[64], s3[64];
     puthdr(c);
+    if (c->snpdir) open_snpf(c);
     if (b->end < b->start) b->end = b->start;
     fmt_pos(s1, sizeof s1, b->start);
     fmt_pos(s2, sizeof s2, b->end);
@@ -274,9 +292,6 @@ static void stage(Core *c, Block *b) {
 }
 
 static void open_snpf(Core *c) {
-    if (!c->snpdir) return;
-    if (c->snpf) fclose(c->snpf);
-
     const char *src = sget(&c->chrom);
     char safe[256]; size_t k = 0;
     if (strlen(src) + 1 > sizeof safe)
@@ -284,11 +299,45 @@ static void open_snpf(Core *c) {
     for (const char *q = src; *q; q++)
         safe[k++] = (*q == '/' || *q == '\\' || *q == '.') ? '_' : *q;
     safe[k] = '\0';
+    if (c->snpf && !strcmp(c->lastsf, src)) return;
+    for (int i = 0; i < c->nsf; i++)
+        if (!strcmp(c->sfn[i], safe))
+            die("chromosome names collide once made safe for a file name: %s", src);
+    if (c->snpf) fclose(c->snpf);
+    c->sfn = xrealloc(c->sfn, (size_t)(c->nsf + 1) * sizeof(char *));
+    c->sfn[c->nsf++] = strdup(safe);
+    snprintf(c->lastsf, sizeof c->lastsf, "%s", src);
     char path[4096];
     snprintf(path, sizeof path, "%s/snp_ch%s.txt", c->snpdir, safe);
     c->snpf = fopen(path, "w");
     if (!c->snpf) die("cannot write '%s': %s", path, strerror(errno));
     snprintf(g_snpf, sizeof g_snpf, "%s", path);
+}
+
+static void mkdirs(const char *dir) {
+    char buf[4096];
+    snprintf(buf, sizeof buf, "%s", dir);
+    size_t n = strlen(buf);
+    for (size_t i = 1; i <= n; i++) {
+        if (buf[i] == '/' || buf[i] == '\\' || buf[i] == '\0') {
+            char ch = buf[i];
+            buf[i] = '\0';
+            struct stat st;
+            if (stat(buf, &st) != 0 && pm_mkdir(buf) != 0 && errno != EEXIST)
+                die("cannot create directory '%s': %s", buf, strerror(errno));
+            buf[i] = ch;
+        }
+    }
+}
+
+static int pkind(const char *name) {
+    char u[256]; size_t k = 0;
+    for (; name[k] && k < sizeof u - 1; k++) u[k] = (char)toupper((unsigned char)name[k]);
+    u[k] = '\0';
+    if (!strcmp(u, "P") || !strcmp(u, "PVAL") || !strcmp(u, "PVALUE") ||
+        !strcmp(u, "P_VALUE") || !strcmp(u, "P-VALUE") || !strncmp(u, "P_", 2)) return 1;
+    if (!strcmp(u, "NEG_LOG10_P") || !strcmp(u, "LOG10_P")) return 2;
+    return 0;
 }
 
 static void closeb(Core *c, double lastp) {
@@ -324,7 +373,6 @@ static void push(Core *c, const char *chrom, double pos, double val,
         c->steps = c->window;
         c->best = c->sig;
         c->lpos = pos;
-        if (c->snpdir) open_snpf(c);
     }
     if (!c->inblk) {
         if (is_sig(c, val)) openb(c, pos, val, id, line);
@@ -335,18 +383,13 @@ static void push(Core *c, const char *chrom, double pos, double val,
             if (is_sig(c, val)) openb(c, pos, val, id, line);
         } else {
             c->steps = remaining;
-            if (c->rany && is_sig(c, val)) {
+            if (is_sig(c, val)) {
                 c->steps = c->window;
                 if (is_better(c, val, c->best)) {
                     c->best = val;
                     c->cur.bp = pos; c->cur.val = val;
                     sset(&c->cur.id, id); sset(&c->cur.line, line);
                 }
-            } else if (is_better(c, val, c->best)) {
-                c->best = val;
-                c->steps = c->window;
-                c->cur.bp = pos; c->cur.val = val;
-                sset(&c->cur.id, id); sset(&c->cur.line, line);
             }
         }
     }
@@ -370,41 +413,33 @@ static int rcmp(const void *A, const void *B) {
 }
 
 static const char *USAGE =
-"physmerge " PM_VERSION " (" PM_BUILD ") -- panel-free physical locus merging\n"
+"physmerge " PM_VERSION PM_BUILD " -- panel-free physical locus merging\n"
 "\n"
 "Usage: physmerge --input FILE [options]\n"
 "\n"
 "Input\n"
 "  -i, --input FILE       summary statistics (plain, .gz, or '-' for stdin)\n"
-"  -f, --format FMT       plink2 (default) | gpcm | custom\n"
-"      --chrom-col NAME   chromosome column   (plink2/gpcm default: #CHROM)\n"
-"      --pos-col NAME     position column     (default: POS)\n"
-"      --id-col NAME      SNP id column       (default: ID; 'NA' to disable)\n"
-"      --value-col NAME   value column        (plink2: P, gpcm: P_HPI)\n"
-"      --sep CHAR         field separator; default auto-detect from header\n"
-"      --no-chrom         ignore the chromosome column entirely\n"
-"      --sort             buffer and sort the input (needed if unsorted)\n"
-"\n"
-"Filters (as in read_sumstat)\n"
-"      --test-col NAME    default TEST\n"
-"      --test-val VALUE   default ADD\n"
-"      --test-filter      force the TEST filter on  (default: on for plink2)\n"
-"      --no-test-filter   force the TEST filter off\n"
+"  -f, --format FMT       plink2 (default) | custom\n"
+"      --chrom-col NAME   chromosome column (plink2: #CHROM; 'NA' to ignore it)\n"
+"      --pos-col NAME     position column   (plink2: POS)\n"
+"      --id-col NAME      SNP id column     (plink2: ID; 'NA' for none)\n"
+"      --value-col NAME   value column      (plink2: P)\n"
+"      --sep SEP          tab, space or one character; default read from header\n"
+"      --test-val VALUE   plink2: TEST value to keep (default ADD)\n"
 "      --chrom LIST       comma-separated chromosomes to keep\n"
+"      --sort             sort input that is not position-sorted\n"
 "\n"
-"Merging (as in physical_merge)\n"
-"  -s, --sig-th NUM       significance threshold (default 5e-8)\n"
+"Merging\n"
+"  -s, --sig-th NUM       significance threshold (default from the value column)\n"
 "  -w, --window NUM       window in bp (default 500000)\n"
-"  -r, --reward min|max   min for p-values (default), max for statistics\n"
-"      --reset-on any|best  window reset rule (default any)\n"
+"  -r, --reward min|max   which direction is significant (default from the value column)\n"
 "\n"
 "Output\n"
 "  -o, --out FILE         block table (default stdout)\n"
 "      --snp-list FILE    representative SNP ids, one per line\n"
 "      --snp-list-dir DIR one snp_ch<CHR>.txt per chromosome\n"
-"      --annotate-full    append the full original line of each lead SNP\n"
-"      --no-header        suppress the output header line\n"
-"  -q, --quiet            suppress progress messages\n"
+"      --annotate-full    append the other original columns of each lead SNP\n"
+"  -q, --quiet            hide progress messages\n"
 "  -h, --help             this help\n"
 "      --version          print version\n";
 
@@ -413,16 +448,16 @@ int main(int argc, char **argv) {
     const char *format = "plink2";
     const char *ccol = NULL, *pcol = NULL, *icol = NULL, *vcol = NULL;
     const char *tcol = "TEST", *tval = "ADD", *chkeep = NULL;
-    int tfilt = -1, dosort = 0, quiet = 0, nohdr = 0, annot = 0, nochr = 0;
+    int dosort = 0, quiet = 0, annot = 0;
     char sep = 0;
-    double sig = 5e-8, window = 500000.0;
-    int rmax = 0, rany = 1;
+    double sig = 0, window = 500000.0;
+    int rmax = 0, gsig = 0, grew = 0;
 
 #define NEXTARG(name) (++i < argc ? argv[i] : (die("missing value for %s", name), (char*)NULL))
     for (int i = 1; i < argc; i++) {
         char *a = argv[i];
         if (!strcmp(a, "-h") || !strcmp(a, "--help")) { fputs(USAGE, stdout); return 0; }
-        else if (!strcmp(a, "--version")) { printf("physmerge %s (%s)\n", PM_VERSION, PM_BUILD); return 0; }
+        else if (!strcmp(a, "--version")) { printf("physmerge %s%s\n", PM_VERSION, PM_BUILD); return 0; }
         else if (!strcmp(a, "-i") || !strcmp(a, "--input")) inp = NEXTARG("--input");
         else if (!strcmp(a, "-o") || !strcmp(a, "--out")) outp = NEXTARG("--out");
         else if (!strcmp(a, "-f") || !strcmp(a, "--format")) format = NEXTARG("--format");
@@ -430,22 +465,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--pos-col")) pcol = NEXTARG("--pos-col");
         else if (!strcmp(a, "--id-col")) icol = NEXTARG("--id-col");
         else if (!strcmp(a, "--value-col")) vcol = NEXTARG("--value-col");
-        else if (!strcmp(a, "--test-col")) tcol = NEXTARG("--test-col");
         else if (!strcmp(a, "--test-val")) tval = NEXTARG("--test-val");
-        else if (!strcmp(a, "--test-filter")) tfilt = 1;
-        else if (!strcmp(a, "--no-test-filter")) tfilt = 0;
         else if (!strcmp(a, "--chrom")) chkeep = NEXTARG("--chrom");
-        else if (!strcmp(a, "--no-chrom")) nochr = 1;
-        else if (!strcmp(a, "-s") || !strcmp(a, "--sig-th")) { if (!pnum(NEXTARG("--sig-th"), &sig)) die("--sig-th must be numeric"); }
+        else if (!strcmp(a, "-s") || !strcmp(a, "--sig-th")) { if (!pnum(NEXTARG("--sig-th"), &sig)) die("--sig-th must be numeric"); gsig = 1; }
         else if (!strcmp(a, "-w") || !strcmp(a, "--window")) { if (!pnum(NEXTARG("--window"), &window)) die("--window must be numeric"); }
         else if (!strcmp(a, "-r") || !strcmp(a, "--reward")) { const char *v = NEXTARG("--reward");
-            if (!strcmp(v, "max")) rmax = 1; else if (!strcmp(v, "min")) rmax = 0; else die("`reward` must be either 'min' or 'max'"); }
-        else if (!strcmp(a, "--reset-on")) { const char *v = NEXTARG("--reset-on");
-            if (!strcmp(v, "any")) rany = 1; else if (!strcmp(v, "best")) rany = 0; else die("`reset_on` must be either 'best' or 'any'"); }
+            if (!strcmp(v, "max")) rmax = 1; else if (!strcmp(v, "min")) rmax = 0; else die("`reward` must be either 'min' or 'max'"); grew = 1; }
         else if (!strcmp(a, "--snp-list")) snpp = NEXTARG("--snp-list");
         else if (!strcmp(a, "--snp-list-dir")) snpd = NEXTARG("--snp-list-dir");
         else if (!strcmp(a, "--annotate-full")) annot = 1;
-        else if (!strcmp(a, "--no-header")) nohdr = 1;
         else if (!strcmp(a, "--sort")) dosort = 1;
         else if (!strcmp(a, "--sep")) { const char *v = NEXTARG("--sep");
             if (!strcmp(v, "tab") || !strcmp(v, "\\t")) sep = '\t';
@@ -458,25 +486,26 @@ int main(int argc, char **argv) {
     if (window <= 0) die("`window` must be a single positive numeric value.");
     if (snpp && snpd) die("use either --snp-list or --snp-list-dir, not both");
 
-    int dtfilt = 0;
+    int tfilt = 0;
     if (!strcmp(format, "plink2")) {
         if (!ccol) ccol = "#CHROM";
         if (!pcol) pcol = "POS";
         if (!icol) icol = "ID";
         if (!vcol) vcol = "P";
-        dtfilt = 1;
-    } else if (!strcmp(format, "gpcm")) {
-        if (!ccol) ccol = "#CHROM";
-        if (!pcol) pcol = "POS";
-        if (!icol) icol = "ID";
-        if (!vcol) vcol = "P_HPI";
+        tfilt = 1;
     } else if (!strcmp(format, "custom")) {
-        if (!pcol || !vcol || (!ccol && !nochr))
-            die("For format = 'custom', you must supply --chrom-col, --pos-col and --value-col.");
-    } else die("--format must be plink2, gpcm or custom");
-    if (tfilt < 0) tfilt = dtfilt;
+        if (!pcol || !vcol || !ccol)
+            die("For format = 'custom', you must supply --chrom-col, --pos-col and --value-col; "
+                "set --chrom-col NA to ignore the chromosome column.");
+    } else die("--format must be plink2 or custom");
     if (icol && !strcmp(icol, "NA")) icol = NULL;
-    if (nochr) ccol = NULL;
+    if (ccol && !strcmp(ccol, "NA")) ccol = NULL;
+
+    int kind = pkind(vcol);
+    if ((!grew || !gsig) && !kind)
+        die("cannot tell whether a larger or a smaller %s is more significant; set --reward and --sig-th.", vcol);
+    if (!grew) rmax = (kind == 2);
+    if (!gsig) sig = (kind == 1) ? 5e-8 : -log10(5e-8);
 
     if (ccol && !strcmp(ccol, "#CHROM")) ccol = "CHROM";
 
@@ -494,6 +523,7 @@ int main(int argc, char **argv) {
     if (!sep) {
         if (strchr(hdr, '\t')) sep = '\t';
         else if (strchr(hdr, ',')) sep = ',';
+        else if (strchr(hdr, ';')) sep = ';';
         else sep = ' ';
     }
 
@@ -521,14 +551,29 @@ int main(int argc, char **argv) {
         if (miss[0]) { size_t L = strlen(miss); miss[L - 2] = '\0'; die("Column(s) not found: %s", miss); }
     }
     if (tfilt && i_test < 0) {
-        if (!quiet) fprintf(stderr, "physmerge: warning: test_col '%s' not found; TEST filter skipped.\n", tcol);
+        warn("TEST column not found; TEST filter skipped.");
         tfilt = 0;
+    }
+    char *xhdr = NULL;
+    if (annot) {
+        char *tmp = strdup(hcopy);
+        char **af = xmalloc((size_t)nf * sizeof(char *));
+        split(tmp, sep, af, nf);
+        xhdr = xmalloc(strlen(hcopy) + 2);
+        xhdr[0] = '\0';
+        for (int k = 0; k < nf; k++) {
+            if (k == i_chrom || k == i_pos || k == i_id || k == i_val) continue;
+            if (xhdr[0]) strcat(xhdr, "\t");
+            strcat(xhdr, af[k] ? af[k] : "");
+        }
+        free(af); free(tmp);
     }
     int maxi = i_pos; if (i_val > maxi) maxi = i_val;
     if (i_chrom > maxi) maxi = i_chrom;
     if (i_id > maxi) maxi = i_id;
     if (tfilt && i_test > maxi) maxi = i_test;
     int want = maxi + 1;
+    if (annot && nf > want) want = nf;
     char **fld = xmalloc((size_t)want * sizeof(char *));
 
     char **keep = NULL; int n_keep = 0;
@@ -542,9 +587,10 @@ int main(int argc, char **argv) {
     }
 
     Core c; memset(&c, 0, sizeof c);
-    c.sig = sig; c.window = window; c.rmax = rmax; c.rany = rany;
+    c.sig = sig; c.window = window; c.rmax = rmax;
     c.havech = (i_chrom >= 0); c.haveid = (i_id >= 0); c.annot = annot;
     c.vname = vcol;
+    if (snpd) mkdirs(snpd);
     c.out = outp ? fopen(outp, "w") : stdout;
     if (!c.out) die("cannot write '%s': %s", outp, strerror(errno));
     g_out = outp;
@@ -552,8 +598,8 @@ int main(int argc, char **argv) {
     if (snpd) c.snpdir = strdup(snpd);
     c.steps = window; c.best = sig;
 
-    if (!nohdr) {
-        size_t hn = strlen(vcol) + (annot && hcopy ? strlen(hcopy) : 0) + 128;
+    {
+        size_t hn = strlen(vcol) + (xhdr ? strlen(xhdr) : 0) + 128;
         char *h = xmalloc(hn);
         h[0] = '\0';
         strcat(h, "serial");
@@ -561,14 +607,16 @@ int main(int argc, char **argv) {
         strcat(h, "\tstart\tend\trps_BP");
         if (c.haveid) strcat(h, "\trps_ID");
         strcat(h, "\trps_"); strcat(h, vcol);
-        if (annot && hcopy) { strcat(h, "\t"); strcat(h, hcopy); }
+        if (xhdr && xhdr[0]) { strcat(h, "\t"); strcat(h, xhdr); }
         strcat(h, "\n");
         c.hdr = h;
     }
 
     unsigned long nread = 0, nkept = 0, ntdrop = 0, ncdrop = 0, nna = 0;
-    int wneg = 0;
+    int wneg = 0, pmset = 0;
+    double pmin = 0, pmax = 0;
     char *lcopy = NULL; size_t lcap = 0;
+    char *tvs[10]; int ntv = 0;
 
     Rec *recs = NULL; size_t n_rec = 0, cap_rec = 0;
     Arena arena; memset(&arena, 0, sizeof arena); arena.p = NULL;
@@ -582,14 +630,27 @@ int main(int argc, char **argv) {
         if (!*ln) continue;
         nread++;
         size_t llen = strlen(ln);
-        if (annot) {
-            if (llen + 1 > lcap) { lcap = (llen + 1) * 2; lcopy = xrealloc(lcopy, lcap); }
-            memcpy(lcopy, ln, llen + 1);
-        }
         split(ln, sep, fld, want);
         if (tfilt) {
-            const char *tv = fld[i_test];
-            if (!tv || strcmp(tv, tval) != 0) { ntdrop++; continue; }
+            const char *tv = fld[i_test] ? fld[i_test] : "";
+            if (strcmp(tv, tval) != 0) {
+                ntdrop++;
+                int seen = 0;
+                for (int k = 0; k < ntv; k++) if (!strcmp(tvs[k], tv)) { seen = 1; break; }
+                if (!seen && ntv < 10 && *tv) tvs[ntv++] = strdup(tv);
+                continue;
+            }
+        }
+        if (annot) {
+            if (llen + 2 > lcap) { lcap = (llen + 2) * 2; lcopy = xrealloc(lcopy, lcap); }
+            lcopy[0] = '\0';
+            int first = 1;
+            for (int k = 0; k < nf; k++) {
+                if (k == i_chrom || k == i_pos || k == i_id || k == i_val) continue;
+                if (!first) strcat(lcopy, "\t");
+                strcat(lcopy, (k < want && fld[k]) ? fld[k] : "");
+                first = 0;
+            }
         }
         const char *ch = (i_chrom >= 0 && fld[i_chrom]) ? fld[i_chrom] : "";
         if (n_keep) {
@@ -601,9 +662,11 @@ int main(int argc, char **argv) {
         if (!pnum(fld[i_pos], &pos) || !pnum(fld[i_val], &val)) { nna++; continue; }
         if (pos < 0 && !wneg) {
             wneg = 1;
-            if (!quiet) fprintf(stderr, "physmerge: warning: negative position(s) found; "
-                                        "block boundaries are clamped at 0.\n");
+            warn("negative position(s) found; block boundaries are clamped at 0.");
         }
+        if (!pmset || pos < pmin) pmin = pos;
+        if (!pmset || pos > pmax) pmax = pos;
+        pmset = 1;
         const char *id = (i_id >= 0 && fld[i_id]) ? fld[i_id] : "";
         nkept++;
 
@@ -623,13 +686,14 @@ int main(int argc, char **argv) {
         if (pset) {
             int same = c.havech ? (strcmp(sget(&pch), ch) == 0) : 1;
             if (same) {
-                if (pos < ppos)
-                    die("input is not position-sorted (chromosome %s: %.0f after %.0f).\n"
-                        "       re-run with --sort, or sort the file first.", ch, pos, ppos);
+                if (pos < ppos) {
+                    if (c.havech)
+                        die("input is not position-sorted (chromosome %s: %.0f after %.0f); set sort to merge it anyway.", ch, pos, ppos);
+                    die("input is not position-sorted (%.0f after %.0f); set sort to merge it anyway.", pos, ppos);
+                }
             } else {
                 for (int k = 0; k < n_cn; k++) if (!strcmp(cnames[k], ch))
-                    die("chromosome %s appears in more than one block of the file.\n"
-                        "       re-run with --sort, or sort the file first.", ch);
+                    die("chromosome %s appears in more than one stretch of the input; set sort to merge it anyway.", ch);
                 cnames = xrealloc(cnames, (size_t)(n_cn + 1) * sizeof(char *));
                 cnames[n_cn++] = strdup(ch);
             }
@@ -641,6 +705,14 @@ int main(int argc, char **argv) {
         push(&c, ch, pos, val, id, annot ? lcopy : "");
     }
     rd_close(&rd);
+
+    if (tfilt && nread && ntdrop == nread) {
+        char lst[1024]; lst[0] = '\0';
+        for (int k = 0; k < ntv; k++) { if (k) strcat(lst, ", "); strncat(lst, tvs[k], 80); }
+        die("no rows have TEST = '%s'; TEST values in this file: %s. Set test_val to one of them.", tval, lst);
+    }
+    if (!c.havech && pmset && pmax - pmin > 2.5e8)
+        warn("positions span more than 250 Mb but there is no chromosome column; blocks may cross chromosome boundaries.");
 
     if (dosort) {
         qsort(recs, n_rec, sizeof(Rec), rcmp);
@@ -654,14 +726,17 @@ int main(int argc, char **argv) {
     if (c.out != stdout) fclose(c.out);
     if (c.snpf) fclose(c.snpf);
     g_out = g_snp = NULL; g_snpf[0] = '\0';
+    if ((snpp || snpd) && c.nblk == 0) warn("no blocks to export.");
 
     if (!quiet) {
-        if (tfilt) fprintf(stderr, "physmerge: TEST filter: kept %lu of %lu rows where %s = '%s'.\n",
-                                 nread - ntdrop, nread, tcol, tval);
+        if (tfilt) fprintf(stderr, "physmerge: TEST filter: kept %lu of %lu rows where TEST = '%s'.\n",
+                                 nread - ntdrop, nread, tval);
         if (ncdrop) fprintf(stderr, "physmerge: %lu row(s) dropped by the chromosome filter.\n", ncdrop);
         if (nna) fprintf(stderr, "physmerge: %lu row(s) dropped (NA in position or value).\n", nna);
-        fprintf(stderr, "physmerge: %lu SNPs -> %ld blocks (window=%.0f, sig_th=%g, reward=%s, reset_on=%s).\n",
-                nkept, c.nblk, window, sig, rmax ? "max" : "min", rany ? "any" : "best");
+        fprintf(stderr, "physmerge: %lu SNPs -> %ld blocks (window=%.0f, sig_th=%g, reward=%s).\n",
+                nkept, c.nblk, window, sig, rmax ? "max" : "min");
+        if (snpp) fprintf(stderr, "physmerge: wrote %ld IDs to %s.\n", c.nblk, snpp);
+        if (snpd) fprintf(stderr, "physmerge: wrote %d chromosome file(s) to %s.\n", c.nsf, snpd);
     }
     return 0;
 }

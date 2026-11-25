@@ -2,99 +2,71 @@
 % Please edit documentation in R/read_sumstat.R
 \name{read_sumstat}
 \alias{read_sumstat}
-\title{Read and prepare GWAS summary statistics for physical merging}
+\title{Read GWAS summary statistics for physical merging}
 \usage{
 read_sumstat(
   path,
-  format = c("plink2", "gpcm", "custom"),
-  value_col = NULL,
+  format = c("plink2", "custom"),
   chrom_col = NULL,
   pos_col = NULL,
   id_col = NULL,
-  test_filter = NULL,
-  test_col = "TEST",
+  value_col = NULL,
   test_val = "ADD",
   chrom = NULL,
-  ...
+  sep = NULL,
+  quiet = FALSE
 )
 }
 \arguments{
-\item{path}{Path to the file (.csv, .tsv, .txt, or compressed).}
+\item{path}{Path to the file. Plain text or gzip (\code{.gz}).}
 
-\item{format}{One of \code{"plink2"}, \code{"gpcm"}, or \code{"custom"}.
+\item{format}{\code{"plink2"} (default) or \code{"custom"}.
 \describe{
-\item{\code{"plink2"}}{PLINK2 \code{.glm.*} output. Default columns:
-\code{#CHROM}, \code{POS}, \code{ID}, \code{P}.}
-\item{\code{"gpcm"}}{REML-GPCM per-SNP output. Default columns:
-\code{#CHROM}, \code{POS}, \code{ID}, \code{P_HPI}.}
-\item{\code{"custom"}}{Specify all column names manually via
-\code{chrom_col}, \code{pos_col}, \code{id_col}, \code{value_col}.}
+\item{\code{"plink2"}}{PLINK2 \code{.glm.*} output. Columns \code{#CHROM},
+\code{POS}, \code{ID} and \code{P}; only rows whose \code{TEST} is
+\code{test_val} are kept.}
+\item{\code{"custom"}}{Any other table. \code{pos_col}, \code{value_col}
+and \code{chrom_col} must be named.}
 }}
 
-\item{value_col}{Name of the column to use as the "value" when merging.
-Overrides the format default when supplied. Common choices: \code{"P"},
-\code{"LOG10_P"}, \code{"P_HPI"}, \code{"P_Direct"}, \code{"T_STAT"}.}
+\item{chrom_col}{Chromosome column. \code{NA} ignores the chromosome
+column, so the whole file is merged as one sequence.}
 
-\item{chrom_col}{Chromosome column name. Overrides format default.
-Set to \code{NA} to ignore the chromosome column and merge the whole file
-as one sequence; a column named \code{CHROM} is then kept in the data
-under its PLINK name \code{#CHROM}, so \code{\link{physical_merge}} does
-not pick it up again.}
+\item{pos_col}{Position column.}
 
-\item{pos_col}{Position column name. Overrides format default.}
+\item{id_col}{SNP id column. \code{NA} for none.}
 
-\item{id_col}{SNP ID column name. Overrides format default.
-Set to \code{NA} if no ID column exists.}
+\item{value_col}{Column holding the p-value or statistic.}
 
-\item{test_filter}{Logical. If \code{TRUE} (default for
-\code{format = "plink2"}), filter rows by \code{test_col == test_val}
-before returning. Useful for multi-covariate PLINK2 output where each
-SNP appears once per TEST value.}
+\item{test_val}{For \code{format = "plink2"}, the \code{TEST} value to keep.
+Default \code{"ADD"}; \code{"DOM"} or \code{"REC"} for dominant or
+recessive models.}
 
-\item{test_col}{Name of the TEST column. Default \code{"TEST"}.}
+\item{chrom}{Chromosomes to keep, e.g. \code{c(1, 2)}. \code{NULL} keeps all.}
 
-\item{test_val}{Value to retain in \code{test_col}. Default \code{"ADD"}.}
+\item{sep}{Field separator: \code{"tab"}, \code{"space"} or a single
+character. \code{NULL} reads it from the header: tab if the header has a
+tab, otherwise comma, otherwise semicolon, otherwise whitespace.}
 
-\item{chrom}{Optional character/integer vector of chromosomes to retain.
-\code{NULL} (default) keeps all.}
-
-\item{...}{Additional arguments passed to \code{data.table::fread}
-(e.g. \code{nThread}, \code{skip}).}
+\item{quiet}{\code{TRUE} hides progress messages. Warnings and errors are
+still shown.}
 }
 \value{
-A named list with two elements:
-\describe{
-\item{\code{data}}{The prepared data frame with all original columns plus
-\code{position} and \code{value} appended, sorted by position (within
-chromosome, in order of first appearance, when there is a chromosome
-column). Rows with \code{NA} in position or value are dropped. A
-\code{#CHROM} column is renamed \code{CHROM}; with \code{chrom_col = NA},
-a \code{CHROM} column is renamed \code{#CHROM} instead.}
-\item{\code{reward}}{Suggested reward direction for
-\code{\link{physical_merge}}: \code{"max"} if \code{value_col} is a
-test statistic or \code{"LOG10_P"}, \code{"min"} otherwise.}
-}
+A data frame: the original columns, then \code{position},
+\code{value}, and \code{chrom} and \code{id} when present.
 }
 \description{
-A unified reader that handles PLINK2 summary statistics, REML-GPCM per-SNP
-output, and arbitrary tabular formats. Uses \code{data.table::fread} for
-fast, separator-agnostic reading; \pkg{data.table} is required.
+Reads a summary-statistics file and adds the role columns that
+\code{\link{physical_merge}} works on: \code{position} and \code{value},
+plus \code{chrom} and \code{id} when the file has them. All original
+columns are kept unchanged. Rows keep the order of the file.
 }
 \examples{
 \dontrun{
-# PLINK2 sumstats (TEST filter auto-enabled)
-out <- read_sumstat("my_gwas.glm.linear", format = "plink2")
-blocks <- physical_merge(out$data, sig_th = 5e-8, window = 500000,
-reward = out$reward)
-blocks <- annotate_blocks(blocks, out$data)
+d <- read_sumstat("my_gwas.glm.linear")
+b <- physical_merge(d)
 
-# REML-GPCM output
-out <- read_sumstat("stage1_ch1_P_HPI.csv", format = "gpcm",
-value_col = "P_HPI", chrom = 1)
-
-# Custom format
-out <- read_sumstat("results.txt", format = "custom",
-chrom_col = "CHR", pos_col = "BP",
-id_col = "SNP", value_col = "P")
+d <- read_sumstat("results.txt", format = "custom",
+chrom_col = "CHR", pos_col = "BP", id_col = "SNP", value_col = "P")
 }
 }
