@@ -301,6 +301,7 @@ Input may be plain text or gzip (`.gz`); the executable also reads `-` as stdin.
 
 ## 6. More
 
-- `physmerge --help`: every flag
+- `physmerge --help`: every flag of the executable
+- `?read_sumstat`, `?physical_merge`, `?annotate_blocks`, `?export_snp_list` in R: each function's arguments, details and examples
 
 MIT licensed.
