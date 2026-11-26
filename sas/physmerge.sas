@@ -88,6 +88,10 @@
     %return;
   %end;
   %if %length(&id_col) = 0 %then %let id_col = NA;
+  %if %length(&chrom) and %upcase(&chrom_col) = NA %then %do;
+    %put ERROR: chrom needs a chromosome column%str(;) it cannot be used with chrom_col = NA.;
+    %return;
+  %end;
 
   %if %upcase(%qscan(&path, -1, .)) = GZ %then %do;
     filename _pmsrc zip "&path" gzip;
@@ -114,7 +118,11 @@
   %else %if &sp = space %then %let dl = ' ';
   %else %if &sp = comma %then %let dl = ',';
   %else %if &sp = semi %then %let dl = ';';
-  %else %let dl = "&sep";
+  %else %if %length(&sep) = 1 %then %let dl = "&sep";
+  %else %do;
+    %put ERROR: sep must be tab, space or a single character.;
+    %return;
+  %end;
 
   options validvarname=v7;
   proc import datafile=_pmsrc out=_pm_imp dbms=dlm replace;
@@ -144,6 +152,12 @@
   %if %upcase(&id_col) ne NA and %length(&vi) = 0 %then %let miss = &miss &id_col;
   %if %length(&miss) %then %do;
     %put ERROR: Column(s) not found:&miss;
+    options validvarname=&vvn;
+    %return;
+  %end;
+
+  %if %pm_nobs(_pm_imp) = 0 %then %do;
+    %put ERROR: No usable rows after filtering.;
     options validvarname=&vvn;
     %return;
   %end;
@@ -527,7 +541,7 @@
         else s = strip(put(round(x, 10**(e - 5)), best12.));
       end;
       call symputx('pm__sg', s);
-      call symputx('pm__wn', put(&window, 32.-l));
+      call symputx('pm__wn', strip(put(&window, best15.)));
     run;
     %put NOTE: physmerge: &pm__nin SNPs -> &nout blocks (window=&pm__wn, sig_th=&pm__sg, reward=%lowcase(&reward)).;
   %end;
@@ -632,7 +646,7 @@
         set &blocks end=_eof;
         length _pmline $ 32767;
         %if &t = C %then %do; _pmline = &v; %end;
-        %else %do; _pmline = strip(put(&v, 32.)); %end;
+        %else %do; _pmline = strip(put(&v, best32.)); %end;
         put _pmline;
       end;
       stop;
@@ -640,11 +654,11 @@
     %if &quiet = 0 %then %put NOTE: physmerge: wrote &n IDs to &file..;
   %end;
   %else %do;
+    %if %length(%pm_vtype(&blocks, CHROM)) = 0 %then %do;
+      %put ERROR: a per-chromosome list needs a chromosome column.; %return;
+    %end;
     %pm_mkdir(&dir);
     %if &n > 0 %then %do;
-      %if %length(%pm_vtype(&blocks, CHROM)) = 0 %then %do;
-        %put ERROR: dir= needs a CHROM column in &blocks..; %return;
-      %end;
       proc sql noprint;
         select count(distinct CHROM), count(distinct translate(cats(CHROM), '___', '/\.'))
           into :nc trimmed, :ns trimmed from &blocks;
@@ -658,7 +672,7 @@
         _safe = translate(cats(CHROM), '___', '/\.');
         _path = cats("&dir", "/snp_ch", _safe, ".txt");
         %if &t = C %then %do; _pmline = &v; %end;
-        %else %do; _pmline = strip(put(&v, 32.)); %end;
+        %else %do; _pmline = strip(put(&v, best32.)); %end;
         file _pmout filevar=_path lrecl=32767;
         put _pmline;
       run;

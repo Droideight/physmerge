@@ -33,9 +33,11 @@ padded by one window on both sides, so two adjacent blocks overlap whenever the
 gap between the last significant SNP of one and the first significant SNP of the
 next is less than two windows. A final trim step moves the end of the earlier
 block back to the start of the next one. The result is contiguous, strictly
-non-overlapping blocks. A block is two windows wide only when it is isolated; a
-trimmed block is narrower. With a chromosome column the merge runs per
-chromosome.
+non-overlapping blocks. An untrimmed block spans two windows plus the distance
+from its first to its last significant SNP; trimming makes it narrower. Two
+neighbouring blocks share one boundary position, and a significant SNP sitting
+exactly on it belongs to the earlier block. With a chromosome column the merge
+runs per chromosome.
 
 ---
 
@@ -283,7 +285,8 @@ given, the header decides: tab if it has a tab, otherwise comma, otherwise
 semicolon, otherwise whitespace.
 
 Chromosome. With `chrom_col` set to `NA`, the chromosome column is ignored and
-the whole file is merged as one sequence.
+the whole file is merged as one sequence; `chrom` and the per-chromosome id
+lists then stop with an error, since there is no chromosome to go by.
 
 Sorting. Input must be sorted by position within each chromosome, with each
 chromosome in one stretch, as PLINK2 writes it. Otherwise all three stop with a
@@ -293,6 +296,8 @@ the whole file in memory instead of streaming it.
 
 TEST filter. If no row has the requested `TEST` value, all three stop and list
 the values the file does have, for example `TEST values in this file: DOM, sex`.
+If no usable row is left after reading and filtering, all three stop with
+`No usable rows after filtering.`
 
 Input may be plain text or gzip (`.gz`); the executable also reads `-` as stdin.
 `quiet` hides the progress lines; warnings and errors are always shown.

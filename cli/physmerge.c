@@ -27,7 +27,8 @@
 static void die(const char *fmt, ...);
 
 static const char *g_out = NULL, *g_snp = NULL;
-static char g_snpf[4096] = {0};
+static char **g_sfp = NULL;
+static int g_nsfp = 0;
 
 static void warn(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
@@ -43,7 +44,7 @@ static void die(const char *fmt, ...) {
     va_end(ap);
     if (g_out) remove(g_out);
     if (g_snp) remove(g_snp);
-    if (g_snpf[0]) remove(g_snpf);
+    for (int i = 0; i < g_nsfp; i++) remove(g_sfp[i]);
     exit(2);
 }
 
@@ -84,6 +85,9 @@ static void rd_open(Reader *r, const char *path) {
     r->buf = xmalloc(r->cap);
     int gz = 0;
     if (strcmp(path, "-") != 0) {
+        struct stat st;
+        if (stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR)
+            die("cannot open '%s': is a directory", path);
         FILE *probe = fopen(path, "rb");
         if (!probe) die("cannot open '%s': %s", path, strerror(errno));
         unsigned char m[2] = {0, 0};
@@ -129,23 +133,24 @@ static int rd_fill(Reader *r) {
 
 static char *rd_line(Reader *r) {
     for (;;) {
-        if (r->pos < r->len) {
-            char *s = r->buf + r->pos;
-            char *nl = memchr(s, '\n', r->len - r->pos);
-            if (nl) {
-                size_t L = (size_t)(nl - s);
-                r->pos += L + 1;
-                if (L && s[L - 1] == '\r') L--;
-                s[L] = '\0';
-                return s;
+        size_t n = r->len - r->pos, L = 0;
+        char *s = r->buf + r->pos;
+        while (L < n && s[L] != '\n' && s[L] != '\r') L++;
+        if (L < n) {
+            if (s[L] == '\r' && L + 1 == n && !r->eof) {
+                if (rd_fill(r)) continue;
+                s = r->buf + r->pos; n = r->len - r->pos;
             }
+            size_t skip = (s[L] == '\r' && L + 1 < n && s[L + 1] == '\n') ? 2 : 1;
+            s[L] = '\0';
+            r->pos += L + skip;
+            return s;
         }
         if (!rd_fill(r)) {
             if (r->pos < r->len) {
-                char *s = r->buf + r->pos;
-                size_t L = r->len - r->pos;
+                s = r->buf + r->pos;
+                L = r->len - r->pos;
                 r->pos = r->len;
-                if (L && s[L - 1] == '\r') L--;
                 s[L] = '\0';
                 return s;
             }
@@ -234,8 +239,8 @@ static int is_sig(const Core *c, double v) { return c->rmax ? (v > c->sig) : (v 
 static int is_better(const Core *c, double v, double b) { return c->rmax ? (v > b) : (v < b); }
 
 static void fmt_pos(char *dst, size_t n, double v) {
-    if (v == floor(v) && fabs(v) < 1e15) snprintf(dst, n, "%.0f", v);
-    else snprintf(dst, n, "%.10g", v);
+    if (v == floor(v) && fabs(v) <= 9007199254740992.0) snprintf(dst, n, "%.0f", v);
+    else snprintf(dst, n, "%.15g", v);
 }
 
 static void puthdr(Core *c) {
@@ -311,7 +316,8 @@ static void open_snpf(Core *c) {
     snprintf(path, sizeof path, "%s/snp_ch%s.txt", c->snpdir, safe);
     c->snpf = fopen(path, "w");
     if (!c->snpf) die("cannot write '%s': %s", path, strerror(errno));
-    snprintf(g_snpf, sizeof g_snpf, "%s", path);
+    g_sfp = xrealloc(g_sfp, (size_t)(g_nsfp + 1) * sizeof(char *));
+    g_sfp[g_nsfp++] = strdup(path);
 }
 
 static void mkdirs(const char *dir) {
@@ -396,6 +402,31 @@ static void push(Core *c, const char *chrom, double pos, double val,
     c->lpos = pos;
 }
 
+typedef struct { char **name; int *rank; size_t cap, n; } Names;
+static size_t nhash(const char *k) {
+    unsigned long long h = 2166136261ULL;
+    for (; *k; k++) h = ((h ^ (unsigned char)*k) * 16777619ULL) & 0xffffffffULL;
+    return (size_t)h;
+}
+static int nfind(const Names *t, const char *k) {
+    if (!t->cap) return -1;
+    for (size_t i = nhash(k) & (t->cap - 1); t->name[i]; i = (i + 1) & (t->cap - 1))
+        if (!strcmp(t->name[i], k)) return t->rank[i];
+    return -1;
+}
+static void nadd(Names *t, char *k, int r) {
+    if (2 * (t->n + 1) > t->cap) {
+        Names u = { NULL, NULL, t->cap ? t->cap * 2 : 64, 0 };
+        u.name = calloc(u.cap, sizeof(char *)); u.rank = calloc(u.cap, sizeof(int));
+        if (!u.name || !u.rank) die("out of memory");
+        for (size_t i = 0; i < t->cap; i++) if (t->name[i]) nadd(&u, t->name[i], t->rank[i]);
+        free(t->name); free(t->rank); *t = u;
+    }
+    size_t i = nhash(k) & (t->cap - 1);
+    while (t->name[i]) i = (i + 1) & (t->cap - 1);
+    t->name[i] = k; t->rank[i] = r; t->n++;
+}
+
 typedef struct { int chrom_rank; double pos, val; unsigned long idx; size_t id_off, line_off; } Rec;
 typedef struct { char *p; size_t len, cap; } Arena;
 static size_t aput(Arena *a, const char *s) {
@@ -476,15 +507,16 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--annotate-full")) annot = 1;
         else if (!strcmp(a, "--sort")) dosort = 1;
         else if (!strcmp(a, "--sep")) { const char *v = NEXTARG("--sep");
-            if (!strcmp(v, "tab") || !strcmp(v, "\\t")) sep = '\t';
+            if (!strcmp(v, "tab")) sep = '\t';
             else if (!strcmp(v, "space")) sep = ' ';
-            else if (strlen(v) == 1) sep = v[0]; else die("--sep must be a single character"); }
+            else if (strlen(v) == 1) sep = v[0]; else die("sep must be tab, space or a single character."); }
         else if (!strcmp(a, "-q") || !strcmp(a, "--quiet")) quiet = 1;
         else die("unknown option '%s' (try --help)", a);
     }
     if (!inp) { fputs(USAGE, stderr); return 2; }
     if (window <= 0) die("`window` must be a single positive numeric value.");
     if (snpp && snpd) die("use either --snp-list or --snp-list-dir, not both");
+    if ((outp && !*outp) || (snpp && !*snpp) || (snpd && !*snpd)) die("an output path is empty.");
 
     int tfilt = 0;
     if (!strcmp(format, "plink2")) {
@@ -501,18 +533,19 @@ int main(int argc, char **argv) {
     if (icol && !strcmp(icol, "NA")) icol = NULL;
     if (ccol && !strcmp(ccol, "NA")) ccol = NULL;
 
-    int kind = pkind(vcol);
-    if ((!grew || !gsig) && !kind)
-        die("cannot tell whether a larger or a smaller %s is more significant; set --reward and --sig-th.", vcol);
-    if (!grew) rmax = (kind == 2);
-    if (!gsig) sig = (kind == 1) ? 5e-8 : -log10(5e-8);
-
+    if (chkeep && !ccol)
+        die("chrom needs a chromosome column; it cannot be used with chrom_col = NA.");
+    if (snpd && !ccol)
+        die("a per-chromosome list needs a chromosome column.");
+    const char *ccol0 = ccol;
     if (ccol && !strcmp(ccol, "#CHROM")) ccol = "CHROM";
 
     if (samef(inp, outp))
         die("--out is the same file as --input; choose a different output path");
     if (samef(inp, snpp))
         die("--snp-list is the same file as --input; choose a different output path");
+    if (samef(outp, snpp))
+        die("--snp-list is the same file as --out; choose a different output path");
 
     Reader rd; rd_open(&rd, inp);
     char *hdr = rd_line(&rd);
@@ -544,12 +577,17 @@ int main(int argc, char **argv) {
     }
     {
         char miss[512]; miss[0] = '\0';
-        if (ccol && i_chrom < 0) { strncat(miss, ccol, 100); strcat(miss, ", "); }
+        if (ccol && i_chrom < 0) { strncat(miss, ccol0, 100); strcat(miss, ", "); }
         if (i_pos < 0) { strncat(miss, pcol, 100); strcat(miss, ", "); }
         if (i_val < 0) { strncat(miss, vcol, 100); strcat(miss, ", "); }
         if (icol && i_id < 0) { strncat(miss, icol, 100); strcat(miss, ", "); }
         if (miss[0]) { size_t L = strlen(miss); miss[L - 2] = '\0'; die("Column(s) not found: %s", miss); }
     }
+    int kind = pkind(vcol);
+    if ((!grew || !gsig) && !kind)
+        die("cannot tell whether a larger or a smaller %s is more significant; set --reward and --sig-th.", vcol);
+    if (!grew) rmax = (kind == 2);
+    if (!gsig) sig = (kind == 1) ? 5e-8 : -log10(5e-8);
     if (tfilt && i_test < 0) {
         warn("TEST column not found; TEST filter skipped.");
         tfilt = 0;
@@ -584,6 +622,7 @@ int main(int argc, char **argv) {
             keep[n_keep++] = strdup(tok);
         }
         free(cp);
+        if (!n_keep) die("chrom lists no chromosomes.");
     }
 
     Core c; memset(&c, 0, sizeof c);
@@ -591,7 +630,8 @@ int main(int argc, char **argv) {
     c.havech = (i_chrom >= 0); c.haveid = (i_id >= 0); c.annot = annot;
     c.vname = vcol;
     if (snpd) mkdirs(snpd);
-    c.out = outp ? fopen(outp, "w") : stdout;
+    c.out = outp ? fopen(outp, "w") : tmpfile();
+    if (!outp && !c.out) c.out = stdout;
     if (!c.out) die("cannot write '%s': %s", outp, strerror(errno));
     g_out = outp;
     if (snpp) { c.snpf = fopen(snpp, "w"); if (!c.snpf) die("cannot write '%s': %s", snpp, strerror(errno)); g_snp = snpp; }
@@ -621,6 +661,7 @@ int main(int argc, char **argv) {
     Rec *recs = NULL; size_t n_rec = 0, cap_rec = 0;
     Arena arena; memset(&arena, 0, sizeof arena); arena.p = NULL;
     char **cnames = NULL; int n_cn = 0;
+    Names ctab; memset(&ctab, 0, sizeof ctab);
 
     Sbuf pch; memset(&pch, 0, sizeof pch);
     int pset = 0; double ppos = 0;
@@ -642,7 +683,7 @@ int main(int argc, char **argv) {
             }
         }
         if (annot) {
-            if (llen + 2 > lcap) { lcap = (llen + 2) * 2; lcopy = xrealloc(lcopy, lcap); }
+            if (llen + (size_t)nf + 2 > lcap) { lcap = (llen + (size_t)nf + 2) * 2; lcopy = xrealloc(lcopy, lcap); }
             lcopy[0] = '\0';
             int first = 1;
             for (int k = 0; k < nf; k++) {
@@ -671,9 +712,8 @@ int main(int argc, char **argv) {
         nkept++;
 
         if (dosort) {
-            int rank = -1;
-            for (int k = 0; k < n_cn; k++) if (!strcmp(cnames[k], ch)) { rank = k; break; }
-            if (rank < 0) { cnames = xrealloc(cnames, (size_t)(n_cn + 1) * sizeof(char *)); cnames[n_cn] = strdup(ch); rank = n_cn++; }
+            int rank = nfind(&ctab, ch);
+            if (rank < 0) { cnames = xrealloc(cnames, (size_t)(n_cn + 1) * sizeof(char *)); cnames[n_cn] = strdup(ch); rank = n_cn++; nadd(&ctab, cnames[rank], rank); }
             if (n_rec == cap_rec) { cap_rec = cap_rec ? cap_rec * 2 : 65536; recs = xrealloc(recs, cap_rec * sizeof(Rec)); }
             recs[n_rec].chrom_rank = rank; recs[n_rec].pos = pos; recs[n_rec].val = val;
             recs[n_rec].idx = (unsigned long)n_rec;
@@ -692,13 +732,14 @@ int main(int argc, char **argv) {
                     die("input is not position-sorted (%.0f after %.0f); set sort to merge it anyway.", pos, ppos);
                 }
             } else {
-                for (int k = 0; k < n_cn; k++) if (!strcmp(cnames[k], ch))
+                if (nfind(&ctab, ch) >= 0)
                     die("chromosome %s appears in more than one stretch of the input; set sort to merge it anyway.", ch);
                 cnames = xrealloc(cnames, (size_t)(n_cn + 1) * sizeof(char *));
-                cnames[n_cn++] = strdup(ch);
+                cnames[n_cn] = strdup(ch); nadd(&ctab, cnames[n_cn], n_cn); n_cn++;
             }
         } else {
             cnames = xrealloc(cnames, sizeof(char *)); cnames[0] = strdup(ch); n_cn = 1;
+            nadd(&ctab, cnames[0], 0);
         }
         sset(&pch, ch); ppos = pos; pset = 1;
 
@@ -711,6 +752,7 @@ int main(int argc, char **argv) {
         for (int k = 0; k < ntv; k++) { if (k) strcat(lst, ", "); strncat(lst, tvs[k], 80); }
         die("no rows have TEST = '%s'; TEST values in this file: %s. Set test_val to one of them.", tval, lst);
     }
+    if (!nkept) die("No usable rows after filtering.");
     if (!c.havech && pmset && pmax - pmin > 2.5e8)
         warn("positions span more than 250 Mb but there is no chromosome column; blocks may cross chromosome boundaries.");
 
@@ -723,9 +765,9 @@ int main(int argc, char **argv) {
     endch(&c);
     puthdr(&c);
 
-    if (c.out != stdout) fclose(c.out);
+    if (outp) fclose(c.out);
     if (c.snpf) fclose(c.snpf);
-    g_out = g_snp = NULL; g_snpf[0] = '\0';
+    g_out = g_snp = NULL; g_nsfp = 0;
     if ((snpp || snpd) && c.nblk == 0) warn("no blocks to export.");
 
     if (!quiet) {
@@ -733,10 +775,16 @@ int main(int argc, char **argv) {
                                  nread - ntdrop, nread, tval);
         if (ncdrop) fprintf(stderr, "physmerge: %lu row(s) dropped by the chromosome filter.\n", ncdrop);
         if (nna) fprintf(stderr, "physmerge: %lu row(s) dropped (NA in position or value).\n", nna);
-        fprintf(stderr, "physmerge: %lu SNPs -> %ld blocks (window=%.0f, sig_th=%g, reward=%s).\n",
+        fprintf(stderr, "physmerge: %lu SNPs -> %ld blocks (window=%.15g, sig_th=%g, reward=%s).\n",
                 nkept, c.nblk, window, sig, rmax ? "max" : "min");
         if (snpp) fprintf(stderr, "physmerge: wrote %ld IDs to %s.\n", c.nblk, snpp);
         if (snpd) fprintf(stderr, "physmerge: wrote %d chromosome file(s) to %s.\n", c.nsf, snpd);
+    }
+    if (!outp && c.out != stdout) {
+        char cb[65536]; size_t k;
+        rewind(c.out);
+        while ((k = fread(cb, 1, sizeof cb, c.out)) > 0) fwrite(cb, 1, k, stdout);
+        fclose(c.out);
     }
     return 0;
 }

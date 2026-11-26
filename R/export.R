@@ -29,16 +29,18 @@ annotate_blocks <- function(blocks, data) {
     if (is.numeric(x) && is.numeric(y)) identical(as.numeric(x), as.numeric(y))
     else identical(as.character(x), as.character(y))
   }
+  nm <- names(data)
   extra <- if (!is.null(pc)) {
-    setdiff(names(data), c(roles, pc[!is.na(pc)]))
+    which(!nm %in% c(roles, pc[!is.na(pc)]))
   } else {
-    Filter(function(nm) {
-      x <- data[[nm]]
-      !(same(x, data$position) || same(x, data$value) ||
-          ("chrom" %in% names(data) && same(x, data$chrom)) ||
-          ("id" %in% names(data) && same(x, data$id)))
-    }, setdiff(names(data), roles))
+    Filter(function(j) {
+      x <- data[[j]]
+      !(nm[j] %in% roles || same(x, data$position) || same(x, data$value) ||
+          ("chrom" %in% nm && same(x, data$chrom)) ||
+          ("id" %in% nm && same(x, data$id)))
+    }, seq_along(nm))
   }
+  extra <- extra[!nm[extra] %in% names(blocks)]
 
   rr <- attr(blocks, "rps_row")
   ok <- !is.null(rr) && length(rr) == nrow(blocks) && !anyNA(rr) &&
@@ -47,7 +49,7 @@ annotate_blocks <- function(blocks, data) {
                      as.numeric(blocks$rps_BP), tolerance = 0))
 
   if (!ok) {
-    key <- function(ch, p) paste(ch, format(p, scientific = FALSE, trim = TRUE))
+    key <- function(ch, p) paste(ch, vapply(p, format, "", digits = 15, scientific = FALSE, trim = TRUE))
     dk <- key(if ("chrom" %in% names(data)) data$chrom else "", data$position)
     bk <- key(if ("CHROM" %in% names(blocks)) blocks$CHROM else "", blocks$rps_BP)
     rr <- match(bk, dk)
@@ -60,6 +62,7 @@ annotate_blocks <- function(blocks, data) {
   }
 
   add <- data[rr, extra, drop = FALSE]
+  names(add) <- nm[extra]
   rownames(add) <- NULL
   out <- cbind(blocks, add)
   attr(out, "rps_row") <- NULL
@@ -91,14 +94,20 @@ annotate_blocks <- function(blocks, data) {
 #' }
 export_snp_list <- function(blocks, file = NULL, dir = NULL, quiet = FALSE) {
 
+  .pm_flag(quiet, "quiet")
   say <- function(...) if (!quiet) message("physmerge: ", ...)
   if (is.null(file) == is.null(dir))
     stop("give either `file` or `dir`, not both.", call. = FALSE)
+  path <- if (is.null(file)) dir else file
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path))
+    stop("an output path is empty.", call. = FALSE)
+  if (!is.null(dir) && !"CHROM" %in% names(blocks))
+    stop("a per-chromosome list needs a chromosome column.", call. = FALSE)
   if (nrow(blocks) == 0L)
     warning("physmerge: no blocks to export.", call. = FALSE)
 
   ids <- if ("rps_ID" %in% names(blocks)) as.character(blocks$rps_ID)
-         else format(blocks$rps_BP, scientific = FALSE, trim = TRUE)
+         else vapply(blocks$rps_BP, format, "", digits = 15, scientific = FALSE, trim = TRUE)
 
   if (!is.null(file)) {
     writeLines(ids, file)
@@ -106,8 +115,6 @@ export_snp_list <- function(blocks, file = NULL, dir = NULL, quiet = FALSE) {
     return(invisible(file))
   }
 
-  if (nrow(blocks) && !"CHROM" %in% names(blocks))
-    stop("`dir` needs a CHROM column in blocks.", call. = FALSE)
   if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
   chroms <- unique(as.character(blocks$CHROM))
   safe <- gsub("[/\\\\.]", "_", chroms)

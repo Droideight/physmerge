@@ -54,7 +54,10 @@ read_sumstat <- function(path,
                          quiet = FALSE) {
 
   format <- match.arg(format)
+  .pm_flag(quiet, "quiet")
   say <- function(...) if (!quiet) message("physmerge: ", ...)
+  if (!is.character(test_val) || length(test_val) != 1L || is.na(test_val))
+    stop("`test_val` must be a single value.", call. = FALSE)
 
   if (format == "plink2") {
     chrom_col <- chrom_col %||% "#CHROM"
@@ -67,23 +70,54 @@ read_sumstat <- function(path,
          "value_col; set chrom_col = NA to ignore the chromosome column.",
          call. = FALSE)
   if (is.null(id_col)) id_col <- NA_character_
+  if (!is.null(chrom)) {
+    if (is.na(chrom_col))
+      stop("chrom needs a chromosome column; it cannot be used with chrom_col = NA.",
+           call. = FALSE)
+    chrom <- as.character(chrom)
+    chrom <- chrom[!is.na(chrom) & nzchar(chrom)]
+    if (!length(chrom)) stop("chrom lists no chromosomes.", call. = FALSE)
+  }
 
-  if (is.null(sep)) sep <- .pm_sep(path)
+  if (!file.exists(path))
+    stop(sprintf("cannot open '%s': No such file or directory", path), call. = FALSE)
+  if (dir.exists(path))
+    stop(sprintf("cannot open '%s': is a directory", path), call. = FALSE)
+  h <- .pm_head(path)
+  if (is.null(sep)) sep <- .pm_sep(h)
   else if (identical(sep, "tab")) sep <- "\t"
   else if (identical(sep, "space")) sep <- " "
+  else if (!is.character(sep) || length(sep) != 1L || nchar(sep) != 1L)
+    stop("sep must be tab, space or a single character.", call. = FALSE)
+  hn <- if (sep == " ") strsplit(trimws(h), "[ \t]+")[[1L]] else strsplit(h, sep, fixed = TRUE)[[1L]]
+  hn <- gsub('^"|"$', "", hn)
+  alias <- function(col) {
+    if (is.na(col) || col %in% hn) return(col)
+    if (col == "#CHROM" && "CHROM" %in% hn) return("CHROM")
+    if (col == "CHROM" && "#CHROM" %in% hn) return("#CHROM")
+    col
+  }
+  chrom_col <- alias(chrom_col)
+  txt <- intersect(c(chrom_col, id_col), hn)
+
   df <- tryCatch(
     as.data.frame(data.table::fread(path, header = TRUE, sep = sep,
+                                    fill = TRUE, blank.lines.skip = TRUE,
+                                    colClasses = if (length(txt)) list(character = txt),
                                     stringsAsFactors = FALSE,
                                     data.table = FALSE, check.names = FALSE)),
     error = function(e) stop("Failed to read file: ", conditionMessage(e),
                              call. = FALSE)
   )
+  if (ncol(df) > length(hn)) df <- df[, seq_along(hn), drop = FALSE]
 
   needed <- c(if (!is.na(chrom_col)) chrom_col, pos_col, value_col,
               if (!is.na(id_col)) id_col)
   missing <- setdiff(needed, names(df))
   if (length(missing) > 0L)
     stop("Column(s) not found: ", paste(missing, collapse = ", "), call. = FALSE)
+  if (nrow(df) == 0L)
+    stop("No usable rows after filtering.", call. = FALSE)
 
   if (format == "plink2") {
     if (!"TEST" %in% names(df)) {
@@ -95,7 +129,7 @@ read_sumstat <- function(path,
       hit <- !is.na(tv) & tv == test_val
       if (!any(hit))
         stop(sprintf("no rows have TEST = '%s'; TEST values in this file: %s. Set test_val to one of them.",
-                     test_val, paste(head(unique(tv[!is.na(tv)]), 10), collapse = ", ")),
+                     test_val, paste(head(unique(tv[!is.na(tv) & nzchar(tv)]), 10), collapse = ", ")),
              call. = FALSE)
       df <- df[hit, , drop = FALSE]
       say(sprintf("TEST filter: kept %d of %d rows where TEST = '%s'.",
@@ -103,16 +137,27 @@ read_sumstat <- function(path,
     }
   }
 
-  if (!is.null(chrom) && !is.na(chrom_col)) {
-    hit <- as.character(df[[chrom_col]]) %in% as.character(chrom)
+  if (!is.na(chrom_col)) {
+    cv <- as.character(df[[chrom_col]])
+    cv[is.na(cv)] <- "NA"
+    df[[chrom_col]] <- cv
+  }
+  if (!is.na(id_col)) {
+    iv <- as.character(df[[id_col]])
+    iv[is.na(iv)] <- "NA"
+    df[[id_col]] <- iv
+  }
+
+  if (!is.null(chrom)) {
+    hit <- df[[chrom_col]] %in% chrom
     if (any(!hit)) say(sum(!hit), " row(s) dropped by the chromosome filter.")
     df <- df[hit, , drop = FALSE]
   }
 
   df$position <- suppressWarnings(as.numeric(df[[pos_col]]))
   df$value <- suppressWarnings(as.numeric(df[[value_col]]))
-  if (!is.na(chrom_col)) df$chrom <- as.character(df[[chrom_col]])
-  if (!is.na(id_col)) df$id <- as.character(df[[id_col]])
+  if (!is.na(chrom_col)) df$chrom <- df[[chrom_col]]
+  if (!is.na(id_col)) df$id <- df[[id_col]]
 
   ok <- !is.na(df$position) & !is.na(df$value)
   if (any(!ok)) say(sum(!ok), " row(s) dropped (NA in position or value).")
@@ -126,15 +171,25 @@ read_sumstat <- function(path,
   df
 }
 
-.pm_sep <- function(path) {
+.pm_head <- function(path) {
   con <- if (grepl("\\.gz$", path)) gzfile(path, "r") else file(path, "r")
   on.exit(close(con))
   h <- readLines(con, n = 1L, warn = FALSE)
   if (!length(h)) stop("empty input file", call. = FALSE)
+  h <- sub("\r.*$", "", h)
+  sub("^\ufeff", "", h)
+}
+
+.pm_sep <- function(h) {
   if (grepl("\t", h, fixed = TRUE)) "\t"
   else if (grepl(",", h, fixed = TRUE)) ","
   else if (grepl(";", h, fixed = TRUE)) ";"
   else " "
+}
+
+.pm_flag <- function(x, name) {
+  if (!is.logical(x) || length(x) != 1L || is.na(x))
+    stop(sprintf("`%s` must be TRUE or FALSE.", name), call. = FALSE)
 }
 
 `%||%` <- function(x, y) if (is.null(x)) y else x

@@ -10,9 +10,8 @@
 #' every significant SNP refills it, which gives the union of the
 #' \eqn{\pm}\code{window} intervals around all significant SNPs. When the
 #' budget runs out, the
-#' block closes one window downstream of its last significant SNP. Blocks whose
-#' representatives lie less than one window apart are then merged, and the end
-#' of each block is trimmed back to the start of the next one. With a
+#' block closes one window downstream of its last significant SNP. The end of
+#' each block is then trimmed back to the start of the next one. With a
 #' \code{chrom} column the merge runs per chromosome, in order of first
 #' appearance.
 #'
@@ -55,6 +54,8 @@
 physical_merge <- function(data, sig_th = NULL, window = 500000, reward = NULL,
                            sort = FALSE, quiet = FALSE) {
 
+  .pm_flag(quiet, "quiet")
+  .pm_flag(sort, "sort")
   say <- function(...) if (!quiet) message("physmerge: ", ...)
 
   if (!is.data.frame(data))
@@ -122,8 +123,10 @@ physical_merge <- function(data, sig_th = NULL, window = 500000, reward = NULL,
   }
 
   rmax <- reward == "max"
-  parts <- lapply(unique(ch), function(cc) {
-    sel <- which(ch == cc)
+  grp <- split(seq_len(n), factor(ch, levels = unique(ch)))
+  parts <- lapply(seq_along(grp), function(j) {
+    sel <- grp[[j]]
+    cc <- names(grp)[j]
     b <- .pm_merge1(pos[sel], val[sel], sig_th, window, rmax)
     b$k <- sel[b$k]
     b$chrom <- rep(cc, length(b$k))
@@ -148,7 +151,7 @@ physical_merge <- function(data, sig_th = NULL, window = 500000, reward = NULL,
   out[[vcol]] <- bv
   attr(out, "rps_row") <- as.integer(rows[k])
 
-  say(sprintf("%d SNPs -> %d blocks (window=%.0f, sig_th=%g, reward=%s).",
+  say(sprintf("%d SNPs -> %d blocks (window=%.15g, sig_th=%g, reward=%s).",
               n, nrow(out), window, sig_th, reward))
   out
 }

@@ -52,9 +52,8 @@ block carries a window-sized budget that the distance travelled spends, and
 every significant SNP refills it, which gives the union of the
 \eqn{\pm}\code{window} intervals around all significant SNPs. When the
 budget runs out, the
-block closes one window downstream of its last significant SNP. Blocks whose
-representatives lie less than one window apart are then merged, and the end
-of each block is trimmed back to the start of the next one. With a
+block closes one window downstream of its last significant SNP. The end of
+each block is then trimmed back to the start of the next one. With a
 \code{chrom} column the merge runs per chromosome, in order of first
 appearance.
 
