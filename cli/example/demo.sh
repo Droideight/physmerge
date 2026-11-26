@@ -11,8 +11,8 @@ echo "### 2. a stricter threshold keeps only the strongest peaks"
 $PM --input demo.glm.linear --sig-th 1e-15 --quiet
 
 echo
-echo "### 3. a 50 kb window splits the chr1 peaks apart"
-$PM --input demo.glm.linear --window 50000 --quiet
+echo "### 3. a 30 kb window splits the first chr1 peak into four blocks"
+$PM --input demo.glm.linear --window 30000 --quiet
 
 echo
 echo "### 4. write the block table and the lead-SNP list to files"
